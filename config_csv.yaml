@@ -1,0 +1,17 @@
+data:
+  n_rct: 800
+  n_obs: 5000
+  n_MC: 100000
+  covairate_name: ["AGE", "RSBP", "ST1PE"]
+  alpha: 0.1
+  delta: 0.1
+  data_seed: 42
+  rct_csv_path: "trial_master.csv"
+  obs_csv_path: "synthetic_stroke_data_20250331_234656.csv"
+
+pasx:
+  lb: 0.1
+  ub: 0.9
+  trial: 0.5
+
+relative_path: "code/csv_data/experiments_u" 

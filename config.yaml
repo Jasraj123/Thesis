@@ -1,0 +1,19 @@
+data:
+  covariate_name: ["X"]
+  x_dim: 1
+  n_rct: 1000
+  n_obs: 20000
+  n_MC: 10000
+  X_range: [-1, 1, 51]
+  data_seed: 17
+
+  alpha: 0.1
+  delta: 0.5
+
+pasx:
+  lb: 0.1
+  ub: 0.9
+  trial: 0.5
+
+relative_path:
+  "code/RCT_data/experiments_u/"
