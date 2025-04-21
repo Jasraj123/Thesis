@@ -27,7 +27,6 @@ class ObservationalDataGenerator:
         self.rct_data = pd.read_csv(rct_file)
         print(f"Loaded RCT data with shape {self.rct_data.shape}")
         
-        # Remove y column if it exists
         if 'y' in self.rct_data.columns:
             self.features_only_data = self.rct_data.drop(columns=['y'])
             print("Removed y column from RCT data")
@@ -201,7 +200,7 @@ class ObservationalDataGenerator:
                         {"role": "user", "content": prompt}
                     ],
                     temperature=0.2,
-                    max_tokens=4000  # Increase max tokens
+                    max_tokens=4000  
                 )
                 
                 # Extract content from response
@@ -456,7 +455,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate synthetic observational data for stroke study")
     parser.add_argument("--api_key", type=str, help="OpenAI API key (or set OPENAI_API_KEY environment variable)")
     parser.add_argument("--model", type=str, default="gpt-4o-mini", help="OpenAI model to use")
-    parser.add_argument("--rct_file", type=str, default="trial_master.csv", help="Reference RCT data file")
+    parser.add_argument("--rct_file", type=str, default="llm_training.csv", help="Reference RCT data file")
     parser.add_argument("--num_samples", type=int, default=30000, help="Total number of samples to generate")
     parser.add_argument("--batch_size", type=int, default=300, help="Batch size for API calls")
     

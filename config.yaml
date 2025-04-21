@@ -2,12 +2,12 @@ data:
   covariate_name: ["X"]
   x_dim: 1
   n_rct: 1000
-  n_obs: 20000
+  n_obs: 25000
   n_MC: 10000
   X_range: [-1, 1, 51]
   data_seed: 17
 
-  alpha: 0.1
+  alpha: 0.05
   delta: 0.5
 
 pasx:

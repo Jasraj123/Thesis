@@ -77,25 +77,16 @@ class CSVDataHandler:
             df_obs = self.full_obs_data.copy()
             print(f"Using all {len(df_obs)} observational data points")
         
+        # Verify that all required covariates are present
+        for cov in self.covs:
+            if cov not in df_rct.columns:
+                print(f"Warning: Covariate '{cov}' not found in RCT data!")
+            if cov not in df_obs.columns:
+                print(f"Warning: Covariate '{cov}' not found in observational data!")
+            
         return df_rct, df_obs
     
     def compute_true_ate(self, df_rct=None):
-        """
-        Compute the true ATE from the RCT data if available.
-        This is a simplified version that assumes the RCT provides the ground truth.
-        
-        Parameters:
-        -----------
-        df_rct : pandas.DataFrame or None
-            RCT dataset. If None, loads from file.
-            
-        Returns:
-        --------
-        true_ate : float
-            Estimated true ATE from RCT
-        std_ate : float
-            Standard deviation of the ATE estimate
-        """
         if df_rct is None:
             df_rct = self.full_rct_data
         
@@ -105,12 +96,9 @@ class CSVDataHandler:
             true_ate = np.mean(treatment_effect)
             std_ate = np.std(treatment_effect) / np.sqrt(len(df_rct))
         else:
-            # Otherwise, compute ATE directly from observed outcomes
-            # This assumes randomization worked well in the RCT
             treated = df_rct[df_rct['A'] == 1]['y']
             control = df_rct[df_rct['A'] == 0]['y']
             true_ate = np.mean(treated) - np.mean(control)
-            # Standard error of difference in means
             std_ate = np.sqrt(np.var(treated)/len(treated) + np.var(control)/len(control))
         
         return true_ate, std_ate 

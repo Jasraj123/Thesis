@@ -12,7 +12,7 @@ from econml.dr import LinearDRLearner, ForestDRLearner
 from sklearn.ensemble import GradientBoostingRegressor, GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression, LinearRegression
 from synthetic_data_generation import *
-from sklearn.model_selection import GridSearchCV, train_test_split
+from sklearn.model_selection import GridSearchCV, RandomizedSearchCV, train_test_split
 from sklearn.dummy import DummyRegressor, DummyClassifier
 from sklearn.calibration import CalibratedClassifierCV
 from xgboost import XGBRegressor, XGBClassifier
@@ -61,9 +61,9 @@ def data_generation(all_covs, n_rct, n_MC, X_range, pasx, seed, df_obs=None):
 
     return mean_trail, df_comp_big, df_obs_out
 
-def tune_model(model, param_grid, X, y, scoring, cv=3, verbose=1):
+def tune_model(model, param_grid, X, y, scoring, cv=3, verbose=1, n_iter=10):
     """
-    Tune model hyperparameters using GridSearchCV.
+    Tune model hyperparameters using RandomizedSearchCV.
     
     Parameters:
     -----------
@@ -81,21 +81,24 @@ def tune_model(model, param_grid, X, y, scoring, cv=3, verbose=1):
         Number of cross-validation folds
     verbose : int, default=1
         Verbosity level
+    n_iter : int, default=10
+        Number of parameter settings sampled
         
     Returns:
     --------
     best_model : estimator object
-        The best model found by GridSearchCV
+        The best model found by RandomizedSearchCV
     """
-    grid_search = GridSearchCV(
-        model, param_grid, scoring=scoring, cv=cv, verbose=verbose, n_jobs=-1
+    random_search = RandomizedSearchCV(
+        model, param_grid, scoring=scoring, cv=cv, verbose=verbose, 
+        n_jobs=-1, n_iter=n_iter, random_state=42
     )
-    grid_search.fit(X, y)
+    random_search.fit(X, y)
     
-    print(f"Best parameters: {grid_search.best_params_}")
-    print(f"Best score: {grid_search.best_score_:.4f}")
+    print(f"Best parameters: {random_search.best_params_}")
+    print(f"Best score: {random_search.best_score_:.4f}")
     
-    return grid_search.best_estimator_
+    return random_search.best_estimator_
 
 def estimate_e(X, A, model_e=None):
     '''
@@ -104,15 +107,28 @@ def estimate_e(X, A, model_e=None):
     print(f"\n------ PROPENSITY MODEL DEBUG ------")
     print(f"X shape: {X.shape}, A shape: {A.shape}")
     
-    if model_e is None or isinstance(model_e, LogisticRegression):
-        # Default propensity model with hyperparameter tuning
+    if model_e is None:
+        class_weight = float(np.sum(A == 0) / np.sum(A == 1))
+        print(f"Class imbalance ratio (control/treatment): {class_weight:.4f}")
+        
         param_grid = {
-            'C': [0.01, 0.1, 1.0, 10.0],
-            'penalty': ['l2'],  # using only l2 for compatibility with all solvers
-            'solver': ['lbfgs', 'newton-cg'],
-            'class_weight': [None, 'balanced']
+            'n_estimators': [100, 200],
+            'max_depth': [3, 4, 5],
+            'learning_rate': [0.01, 0.03, 0.05],
+            'min_child_weight': [1, 3, 5],
+            'subsample': [0.8, 1.0],
+            'colsample_bytree': [0.8, 1.0]
         }
-        base_model = LogisticRegression(max_iter=1000, random_state=42)
+        
+        base_model = XGBClassifier(
+            gamma=0.1,
+            reg_alpha=0.2,
+            reg_lambda=1.0,
+            scale_pos_weight=class_weight,
+            random_state=42,
+            n_jobs=-1
+        )
+        
         model_e = tune_model(
             base_model, 
             param_grid, 
@@ -120,7 +136,14 @@ def estimate_e(X, A, model_e=None):
             A.ravel(), 
             scoring='roc_auc'
         )
-    
+        
+        # Apply calibration to ensure well-calibrated probabilities
+        model_e = CalibratedClassifierCV(
+            model_e,
+            method='sigmoid',
+            cv=3
+        )
+
     e = model_e.fit(X, A.ravel()).predict_proba(X)[:, 1]
     
     # Add these debug statements to check propensity model fit
@@ -152,7 +175,7 @@ def estimate_mu(X, A, y, model_y=None):
     '''
     train_data = np.concatenate((X, A), axis=1)
     
-    if model_y is None or isinstance(model_y, LinearRegression):
+    if model_y is None:
         # Default outcome model with hyperparameter tuning
         param_grid = {
             'n_estimators': [100, 200, 300],
@@ -225,20 +248,16 @@ def get_estimates(dataset_train, dataset_val, delta, significance_level=0.05):
     e = estimate_e(X_train, A_train)
     mu0, mu1 = estimate_mu(X_train, A_train, Y_train)
     
-    # Fix the shape issue by ensuring all components are properly shaped
-    # Convert to flattened arrays where needed
     A_flat = A_train.flatten()
     Y_flat = Y_train.flatten()
     e_flat = e.flatten()
     mu0_flat = np.array(mu0).flatten()
     mu1_flat = np.array(mu1).flatten()
     
-    # Calculate AIPW with explicit control of dimensions
     aipw_term1 = (A_flat * Y_flat / e_flat) - ((1 - A_flat) * Y_flat / (1 - e_flat))
     aipw_term2 = ((A_flat - e_flat) / e_flat * (1 - e_flat)) * ((1-e_flat) * mu1_flat + e_flat * mu0_flat)
     aipw = (aipw_term1 - aipw_term2).reshape(-1, 1)
     
-    # Print shape information for debugging
     print(f"Shape of A_train: {A_train.shape}")
     print(f"Shape of Y_train: {Y_train.shape}")
     print(f"Shape of e: {e.shape}")
@@ -269,12 +288,10 @@ def get_estimates(dataset_train, dataset_val, delta, significance_level=0.05):
     
     print(f"Treatment proportion in obs train data: {np.mean(T_N_train):.4f}")
     
-    # Create a validation set for early stopping
-    X_train_fit, Y_train_fit, T_train_fit = train_test_split(
+    X_train_fit, X_test_fit, Y_train_fit, Y_test_fit, T_train_fit, T_test_fit = train_test_split(
         X_N_train, Y_N_train, T_N_train, test_size=0.2, random_state=42
     )
     
-    # Tune outcome regression model
     outcome_param_grid = {
         'n_estimators': [100, 200, 300],
         'max_depth': [3, 5, 7],
@@ -293,7 +310,6 @@ def get_estimates(dataset_train, dataset_val, delta, significance_level=0.05):
         objective='reg:squarederror'
     )
     
-    # Prepare combined features (X and treatment)
     X_T_train_fit = np.concatenate((X_train_fit, T_train_fit), axis=1)
     
     regressor = tune_model(
@@ -304,7 +320,6 @@ def get_estimates(dataset_train, dataset_val, delta, significance_level=0.05):
         scoring='neg_root_mean_squared_error'
     )
     
-    # Tune propensity model
     class_weight = float(np.sum(T_N_train == 0) / np.sum(T_N_train == 1))
     print(f"Class imbalance ratio (control/treatment): {class_weight:.4f}")
     
@@ -335,7 +350,6 @@ def get_estimates(dataset_train, dataset_val, delta, significance_level=0.05):
         verbose=0
     )
     
-    # Use calibration for better probability estimates
     propensity = CalibratedClassifierCV(
         tuned_propensity,
         method='sigmoid',

@@ -54,7 +54,6 @@ class SyntheticDataModule:
         """Generate complex nonlinear features from input covariates"""
         n_samples = len(X)
         
-        # Create synthetic additional covariates from X
         X1 = X.copy()
         X2 = np.sin(2.5 * X) + 0.3 * np.random.normal(size=n_samples)
         X3 = np.cos(1.7 * X) + 0.4 * np.random.normal(size=n_samples)
@@ -163,15 +162,67 @@ class SyntheticDataModule:
 
 # def generate_large_dataset(n_samples=250000, seed=42, output_file="optimized_generated_data.csv"):
 #     np.random.seed(seed)
+        
+#     base_generator = SyntheticDataModule(n_rct=n_samples, seed=seed)
     
-#     large_data_generator = SyntheticDataModule(n_rct=n_samples, seed=seed)
+#     X = np.random.beta(2, 3, size=n_samples) * 3 - 1.5  # More skewed than uniform
     
-#     # Generate outcomes influenced by X, A, and U
-#     print(f"Generating data for {n_samples} samples...")
-#     large_df = large_data_generator._generate_data_rct()
+#     # unmeasured confounders 
+#     U = np.random.normal(0, 1, size=n_samples)
+    
+#     propensity = expit(0.5 * X + 0.7 * U)
+#     A = np.random.binomial(1, propensity)
+    
+#     n = len(X)
+#     X1 = X.copy()
+#     X2 = np.sin(2.5 * X) + 0.3 * np.random.normal(size=n)
+#     X3 = np.cos(1.7 * X) + 0.4 * np.random.normal(size=n)
+    
+#     X_matrix = np.column_stack([X1, X2, X3])
+    
+#     features = np.zeros((n, 5))
+    
+#     freq_params = base_generator.freq_params
+#     phase_params = base_generator.phase_params
+#     amplitude_params = base_generator.amplitude_params
+#     interaction_weights = base_generator.interaction_weights
+    
+#     for i in range(3):
+#         features[:, 0] += amplitude_params[i] * np.sin(freq_params[i] * X_matrix[:, i] + phase_params[i])
+#         features[:, 1] += amplitude_params[i] * np.cos(freq_params[i] * X_matrix[:, i] * 1.5)
+    
+#     features[:, 2] = np.exp(-0.5 * np.sum(X_matrix[:, :3]**2, axis=1))
+#     features[:, 3] = np.sum(X_matrix[:, :3]**3, axis=1) - np.sum(X_matrix[:, :3]**2, axis=1)
+    
+#     for i in range(3):
+#         for j in range(i+1, 3):
+#             features[:, 4] += interaction_weights[i, j] * X_matrix[:, i] * X_matrix[:, j]
+    
+#     # Base effect similar but with additional U influence
+#     treatment_effect = 15.0 + 3.0 * features[:, 0] + 2.5 * features[:, 3] + 1.0 * U
+    
+#     y0 = 5.0 * features[:, 0] + 3.0 * features[:, 1] + 7.0 * features[:, 2] + 2.0 * features[:, 4] - 2.0 * U
+    
+#     y1 = y0 + treatment_effect
+    
+#     noise_scale = 0.5 + 0.5 * np.abs(features[:, 2]) + 0.3 * np.abs(U)
+#     noise = np.random.normal(0, noise_scale, size=n)
+    
+#     Y = np.where(A == 1, y1, y0) + noise
+    
+#     large_df = pd.DataFrame({
+#         'X': X,
+#         'A': A,
+#         'y': Y
+#     })
     
 #     large_df.to_csv(output_file, index=False)
-#     print(f"Saved large dataset to {output_file}")
+#     print(f"Saved large observational dataset to {output_file}")
+#     print("Key differences from RCT data:")
+#     print(" - Beta distribution for covariates instead of uniform")
+#     print(" - Treatment assignment depends on covariates and unmeasured confounders")
+#     print(" - Unmeasured confounders affect both treatment assignment and outcomes")
+#     print(" - Modified treatment effect heterogeneity")
     
 #     return large_df
 

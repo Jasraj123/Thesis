@@ -14,6 +14,7 @@ def run_experiment(config_run, seed_list, methods_list, alpha):
     
     # Get covariate names
     all_covs = config_run['data']['covairate_name']
+    print(f"Using covariates: {all_covs}")
     
     # Get sample sizes
     n_rct = config_run['data']['n_rct']
@@ -42,21 +43,21 @@ def run_experiment(config_run, seed_list, methods_list, alpha):
         # Get data slices for this seed
         df_rct, df_obs = data_handler.get_df(n_rct=n_rct, n_obs=n_obs, seed_index=seed_index)
         
-        # Add these diagnostic prints
         print(f"NaN counts in RCT data:\n{df_rct.isna().sum()}")
         print(f"NaN counts in OBS data:\n{df_obs.isna().sum()}")
         
-        # Add data validation and cleaning
-        # Drop rows with NaN values
         df_rct = df_rct.dropna()
         df_obs = df_obs.dropna()
         
-        # Verify we still have enough data after cleaning
-        if len(df_rct) < 10 or len(df_obs) < 10:  # arbitrary minimum threshold
+        if len(df_rct) < 10 or len(df_obs) < 10:  
             print(f"Warning: Too few samples after removing NaN values. RCT: {len(df_rct)}, OBS: {len(df_obs)}")
             continue
+        
+        print(f"RCT data shape: {df_rct.shape}")
+        print(f"OBS data shape: {df_obs.shape}")
+        print(f"RCT columns: {df_rct.columns.tolist()}")
+        print(f"OBS columns: {df_obs.columns.tolist()}")
             
-        # Run the analysis
         try:
             ate_est, ate_ci = sim_cases(seed, df_rct, df_obs, alpha, delta)
         except Exception as e:
@@ -68,14 +69,10 @@ def run_experiment(config_run, seed_list, methods_list, alpha):
         df["ate_est"] = ate_est
         df["ate_ci_width"] = [0.5 * (ate_ci[i][1] - ate_ci[i][0]) for i in range(len(methods_list))]
         
-        # Create directory if it doesn't exist
         os.makedirs(f"{save_dir}/exp_results/alpha_{alpha}/unconfounding_0", exist_ok=True)
-        
-        # Save results
         df.to_csv(f"{save_dir}/exp_results/alpha_{alpha}/unconfounding_0/estimates_{seed}.csv")
 
 if __name__ == "__main__":
-    # Increase the number of seeds for more robust evaluation
     seed_list = [
         list(range(0, 20, 2)),  # Seeds for alpha=0.05 
         list(range(1, 20, 2))   # Seeds for alpha=0.1
