@@ -20,323 +20,78 @@ class SyntheticDataGenerator:
         self.output_dir = Path("generated_data")
         self.output_dir.mkdir(exist_ok=True)
         
-    def load_rct_data(self, rct_file):
-        """Load RCT data from file."""
-        print(f"Loading RCT data from {rct_file}...")
-        self.rct_data = pd.read_csv(rct_file)
-        print(f"Loaded RCT data with shape {self.rct_data.shape}")
-        
-        # Keep only the features we need
-        if 'X' not in self.rct_data.columns:
-            raise ValueError("RCT data must contain 'X' column")
-            
-        if 'y' in self.rct_data.columns:
-            self.features_only_data = self.rct_data.drop(columns=['y'])
-            print("Removed y column from RCT data")
-        else:
-            self.features_only_data = self.rct_data.copy()
-        
-        print(f"Features data shape: {self.features_only_data.shape}")
-        print("Column statistics:")
-        print(self.features_only_data.describe())
-        
-        return self.features_only_data
-    
     def generate_data(self, total_samples=30000, batch_size=300):
         """
-        Generate synthetic data:
-        1. Generate y values for existing RCT features
-        2. Generate additional samples to reach total_samples
-        3. Combine into one dataset
+        Generate synthetic data purely from prompt.
         """
         output_file = self.output_dir / f"synthetic_data_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
         
-        # Get the number of RCT samples and additional samples needed
-        num_rct_samples = len(self.features_only_data)
-        num_additional_samples = total_samples - num_rct_samples
+        print(f"Generating {total_samples} synthetic samples...")
         
-        print(f"Generating data with {num_rct_samples} RCT samples and {num_additional_samples} additional samples")
-        
-        # Step 1: Generate y values for existing RCT samples
-        rct_with_y = self._generate_y_for_rct(batch_size)
-        
-        # Step 2: Generate additional synthetic samples
-        additional_data = self._generate_additional_samples(num_additional_samples, batch_size)
-        
-        # Step 3: Combine datasets
-        final_data = pd.concat([rct_with_y, additional_data], ignore_index=True)
+        # Generate all synthetic samples from scratch
+        synthetic_data = self._generate_samples(total_samples, batch_size)
         
         # Save the final dataset
-        final_data.to_csv(output_file, index=False)
-        print(f"Final dataset with {len(final_data)} samples saved to {output_file}")
+        synthetic_data.to_csv(output_file, index=False)
+        print(f"Final dataset with {len(synthetic_data)} samples saved to {output_file}")
         
         # Print statistics
-        self._print_dataset_statistics(final_data)
+        self._print_dataset_statistics(synthetic_data)
         
-        return final_data
+        return synthetic_data
     
-    def _generate_y_for_rct(self, batch_size):
-        """Generate y values for existing RCT features using OpenAI."""
-        print(f"Generating y values for {len(self.features_only_data)} RCT samples...")
-        
-        # Create a copy of the RCT data to add y values
-        rct_with_y = self.features_only_data.copy()
+    def _generate_samples(self, num_samples, batch_size):
+        """Generate synthetic samples using OpenAI."""
+        print(f"Generating {num_samples} synthetic samples...")
         
         # Process in batches
-        all_y_values = np.zeros(len(rct_with_y))
-        num_batches = (len(rct_with_y) + batch_size - 1) // batch_size
-        
-        for batch_idx in range(num_batches):
-            start_idx = batch_idx * batch_size
-            end_idx = min(start_idx + batch_size, len(rct_with_y))
-            
-            print(f"Processing RCT batch {batch_idx+1}/{num_batches} (samples {start_idx}-{end_idx})...")
-            
-            # Get batch features
-            batch_features = rct_with_y.iloc[start_idx:end_idx].reset_index(drop=True)
-            
-            # Create prompt for this batch
-            prompt = """
-            Generate continuous outcome (y) values for these samples based on a complex nonlinear data generating process.
-            
-            Background:
-            - X is the primary covariate, uniformly distributed between -1.5 and 1.5
-            - A=1 means the unit received treatment, A=0 means no treatment
-            - The treatment was randomly assigned in this RCT data
-            
-            Data Generating Process:
-            1. The baseline outcome (for untreated) should follow a complex nonlinear function of X
-            2. The treatment effect varies based on X in a nonlinear way
-            3. The average treatment effect should be around 15 units
-            4. Higher X values generally lead to more extreme outcomes
-            5. There should be heteroskedastic noise (varying noise levels based on X)
-            
-            Here are the features for each unit:
-            {features}
-            
-            Return ONLY a CSV with all original columns plus y, where y contains your generated continuous outcomes.
-            """.format(features=batch_features.to_csv(index=False))
-            
-            # Generate y values
-            y_values = self._call_openai_with_retry(prompt, batch_features)
-            
-            # Store in the full array
-            all_y_values[start_idx:end_idx] = y_values
-        
-        # Add generated y values to the RCT data
-        rct_with_y['y'] = all_y_values
-        
-        print(f"Successfully generated y values for all RCT samples")
-        print(f"RCT average outcome: {rct_with_y['y'].mean():.2f}")
-        
-        return rct_with_y
-    
-    def _generate_additional_samples(self, num_samples, batch_size):
-        """Generate additional synthetic samples to reach desired total."""
-        if num_samples <= 0:
-            return pd.DataFrame(columns=self.features_only_data.columns.tolist() + ['y'])
-            
-        print(f"Generating {num_samples} additional synthetic samples...")
-        
-        # Process in batches
-        additional_data_list = []
+        data_list = []
         remaining_samples = num_samples
         
         while remaining_samples > 0:
             batch_size_actual = min(batch_size, remaining_samples)
             print(f"Generating batch of {batch_size_actual} samples ({remaining_samples} remaining)...")
             
-            # Create prompt for this batch, using the RCT data as reference
             prompt = """
-            Generate {num_samples} new synthetic data points following a specific data generating process.
-            
-            Reference data (RCT):
-            {reference_data}
-            
-            Data Generating Process for Observational Data:
-            1. Generate X values from a uniform distribution between -1.5 and 1.5
-            2. Treatment assignment (A) should follow a pattern where:
-               - Higher X values increase the probability of treatment
-               - There should be unmeasured confounding that affects both treatment and outcome
-               - Use a logistic function to determine treatment probability
-            3. The outcome model should:
-               - Include complex nonlinear effects of X
-               - Have treatment effect heterogeneity (effect varies with X nonlinearly)
-               - Have a baseline average treatment effect of around 15 units
-               - Include heteroskedastic noise (variance increases with certain X values)
-            
-            Important Characteristics:
-            - The influence of unmeasured confounders should be moderate
+            Generate {num_samples} synthetic observational data points using the following data-generating process, which includes unmeasured confounding.
+
+            Data Generating Process:
+            1. Generate covariate X from a uniform distribution between -1.5 and 1.5.
+            2. Introduce an unobserved confounder U from a standard normal distribution.
+            3. Treatment assignment (A) depends on both X and U:
+               - Use a logistic function: P(A=1 | X, U) = sigmoid(α * X + β * U + c)
+               - Choose α, β such that X has a moderate effect and U has a strong confounding effect.
+            4. The outcome (y) depends nonlinearly on X, U, and A:
+               - Compute a set of nonlinear features of X (e.g., sinusoids, exponentials, interactions)
+               - y0 = f(X, U): baseline outcome under control
+               - Treatment effect varies nonlinearly with X
+               - y1 = y0 + Δ(X): treated outcome
+               - Observed outcome y = A * y1 + (1 - A) * y0
+            5. Add heteroskedastic noise to y:
+               - Noise variance increases with a nonlinear function of X or U
+
+            Key Properties:
+            - Unmeasured confounding is present through U affecting both A and y
+            - Treatment effect is heterogeneous and nonlinearly related to X
+            - Average treatment effect is positive (~15 units), i.e., treatment increases y
+            - The outcome y is continuous
             - Maintain complex nonlinear relationships between variables
-            - The outcome (y) should be continuous
-            - Treatment generally reduces the outcome value
-            
-            Return ONLY a CSV with columns X,A,y containing your {num_samples} synthetic data points.
-            """.format(
-                num_samples=batch_size_actual,
-                reference_data=self.features_only_data.sample(min(20, len(self.features_only_data))).to_csv(index=False)
-            )
+
+            Return ONLY a CSV with columns: X, A, y
+            """.format(num_samples=batch_size_actual)
             
             # Generate batch of synthetic data
             response = self._call_openai_for_synthetic_data(prompt, batch_size_actual)
-            additional_data_list.append(response)
+            data_list.append(response)
             remaining_samples -= len(response)
         
         # Combine all batches
-        additional_data = pd.concat(additional_data_list, ignore_index=True)
+        synthetic_data = pd.concat(data_list, ignore_index=True)
         
-        print(f"Successfully generated {len(additional_data)} additional synthetic samples")
-        print(f"Additional data average outcome: {additional_data['y'].mean():.2f}")
+        print(f"Successfully generated {len(synthetic_data)} synthetic samples")
+        print(f"Data average outcome: {synthetic_data['y'].mean():.2f}")
         
-        return additional_data
-    
-    def _call_openai_with_retry(self, prompt, batch_features, max_retries=3):
-        """Call OpenAI API to generate y values with retries."""
-        for attempt in range(max_retries):
-            try:
-                response = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=[
-                        {"role": "system", "content": "You are a helpful assistant that generates realistic synthetic data according to complex data generating processes."},
-                        {"role": "user", "content": prompt}
-                    ],
-                    temperature=0.2,
-                    max_tokens=4000  
-                )
-                
-                # Extract content from response
-                content = response.choices[0].message.content
-                
-                # Save raw response for debugging
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                raw_file = self.output_dir / f"raw_response_{timestamp}.txt"
-                with open(raw_file, "w") as f:
-                    f.write(content)
-                print(f"Raw response saved to {raw_file}")
-                
-                # Try to parse as CSV
-                # Clean up response if needed
-                if "```" in content:
-                    parts = content.split("```")
-                    for part in parts:
-                        # Look for CSV with the right column headers
-                        if "X" in part and "A" in part:
-                            content = part.strip()
-                            if content.startswith("csv") or content.startswith("CSV"):
-                                content = content[3:].strip()
-                            break
-                
-                # Parse CSV using StringIO
-                df = pd.read_csv(StringIO(content))
-                
-                # Extract y values, handling different column names
-                if 'y' in df.columns:
-                    y_values = df['y'].values
-                elif 'Y' in df.columns:
-                    y_values = df['Y'].values
-                else:
-                    raise ValueError("No y column found in response")
-                
-                # Handle partial responses (when we get fewer values than requested)
-                if len(y_values) < len(batch_features):
-                    print(f"Warning: Generated {len(y_values)} values but needed {len(batch_features)}")
-                    print(f"Processing in multiple parts...")
-                    
-                    # Keep track of the values we already have
-                    all_values = np.zeros(len(batch_features))
-                    all_values[:len(y_values)] = y_values
-                    
-                    # Process the remaining rows in smaller chunks
-                    remaining_start = len(y_values)
-                    chunk_size = 200  # Smaller size for remaining chunks
-                    
-                    while remaining_start < len(batch_features):
-                        remaining_end = min(remaining_start + chunk_size, len(batch_features))
-                        remaining_chunk = batch_features.iloc[remaining_start:remaining_end]
-                        
-                        # Create a new prompt for just this chunk
-                        chunk_prompt = """
-                        Generate continuous outcome (y) values for these samples based on a complex nonlinear data generating process.
-                        
-                        Background:
-                        - X is the primary covariate, uniformly distributed between -1.5 and 1.5
-                        - A=1 means the unit received treatment, A=0 means no treatment
-                        - The treatment was randomly assigned in this RCT data
-                        
-                        Data Generating Process:
-                        1. The baseline outcome (for untreated) should follow a complex nonlinear function of X
-                        2. The treatment effect varies based on X in a nonlinear way
-                        3. The average treatment effect should be around 15 units
-                        4. Higher X values generally lead to more extreme outcomes
-                        5. There should be heteroskedastic noise (varying noise levels based on X)
-                        
-                        Here are the features for each unit:
-                        {features}
-                        
-                        Return ONLY a CSV with all original columns plus y, where y contains your generated continuous outcomes.
-                        """.format(features=remaining_chunk.to_csv(index=False))
-                        
-                        # Make a new API call for this chunk
-                        print(f"Generating values for chunk {remaining_start}-{remaining_end}...")
-                        
-                        chunk_response = self.client.chat.completions.create(
-                            model=self.model,
-                            messages=[
-                                {"role": "system", "content": "You are a helpful assistant that generates realistic synthetic data according to complex data generating processes."},
-                                {"role": "user", "content": chunk_prompt}
-                            ],
-                            temperature=0.2,
-                            max_tokens=2000
-                        )
-                        
-                        chunk_content = chunk_response.choices[0].message.content
-                        
-                        # Parse the chunk response
-                        try:
-                            if "```" in chunk_content:
-                                parts = chunk_content.split("```")
-                                for part in parts:
-                                    if "X" in part and "A" in part:
-                                        chunk_content = part.strip()
-                                        if chunk_content.startswith("csv") or chunk_content.startswith("CSV"):
-                                            chunk_content = chunk_content[3:].strip()
-                                        break
-                            
-                            chunk_df = pd.read_csv(StringIO(chunk_content))
-                            
-                            if 'y' in chunk_df.columns:
-                                chunk_y_values = chunk_df['y'].values
-                            elif 'Y' in chunk_df.columns:
-                                chunk_y_values = chunk_df['Y'].values
-                            else:
-                                raise ValueError("No y column found in chunk response")
-                            
-                            # Add these values to our collection
-                            chunk_size_actual = min(len(chunk_y_values), remaining_end - remaining_start)
-                            all_values[remaining_start:remaining_start+chunk_size_actual] = chunk_y_values[:chunk_size_actual]
-                            
-                            # Move to next chunk
-                            remaining_start += chunk_size_actual
-                            
-                        except Exception as e:
-                            print(f"Error processing chunk: {e}")
-                            # Continue to next chunk
-                            remaining_start = remaining_end
-                    
-                    # Now use the complete set of values
-                    y_values = all_values
-                
-                return y_values
-            
-            except Exception as e:
-                print(f"Error on attempt {attempt+1}/{max_retries}: {e}")
-                if attempt < max_retries - 1:
-                    wait_time = 2 ** attempt
-                    print(f"Retrying in {wait_time} seconds...")
-                    time.sleep(wait_time)
-                else:
-                    print("All retry attempts failed.")
-                    raise RuntimeError(f"Failed to generate y values after {max_retries} attempts: {e}")
+        return synthetic_data
     
     def _call_openai_for_synthetic_data(self, prompt, batch_size, max_retries=3):
         """Call OpenAI API to generate complete synthetic data with retries."""
@@ -406,6 +161,45 @@ class SyntheticDataGenerator:
                 if len(df) > batch_size:
                     df = df.iloc[:batch_size]
                 
+                # If we get fewer samples than requested, try to generate the remaining
+                if len(df) < batch_size:
+                    remaining = batch_size - len(df)
+                    print(f"Only received {len(df)} samples, generating {remaining} more...")
+                    
+                    remaining_prompt = """
+                    Generate {num_samples} synthetic observational data points using the following data-generating process, which includes unmeasured confounding.
+
+                    Data Generating Process:
+                    1. Generate covariate X from a uniform distribution between -1.5 and 1.5.
+                    2. Introduce an unobserved confounder U from a standard normal distribution.
+                    3. Treatment assignment (A) depends on both X and U:
+                       - Use a logistic function: P(A=1 | X, U) = sigmoid(α * X + β * U + c)
+                       - Choose α, β such that X has a moderate effect and U has a strong confounding effect.
+                    4. The outcome (y) depends nonlinearly on X, U, and A:
+                       - Compute a set of nonlinear features of X (e.g., sinusoids, exponentials, interactions)
+                       - y0 = f(X, U): baseline outcome under control
+                       - Treatment effect varies nonlinearly with X
+                       - y1 = y0 + Δ(X): treated outcome
+                       - Observed outcome y = A * y1 + (1 - A) * y0
+                    5. Add heteroskedastic noise to y:
+                       - Noise variance increases with a nonlinear function of X or U
+
+                    Key Properties:
+                    - Unmeasured confounding is present through U affecting both A and y
+                    - Treatment effect is heterogeneous and nonlinearly related to X
+                    - Average treatment effect is positive (~15 units), i.e., treatment increases y
+                    - The outcome y is continuous
+                    - Maintain complex nonlinear relationships between variables
+
+                    Return ONLY a CSV with columns: X, A, y
+                    """.format(num_samples=remaining)
+                    
+                    try:
+                        additional_response = self._call_openai_for_synthetic_data(remaining_prompt, remaining)
+                        df = pd.concat([df, additional_response], ignore_index=True)
+                    except Exception as e:
+                        print(f"Failed to generate additional samples: {e}")
+                
                 return df
             
             except Exception as e:
@@ -462,10 +256,9 @@ class SyntheticDataGenerator:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Generate synthetic data from RCT reference")
+    parser = argparse.ArgumentParser(description="Generate synthetic data purely from prompts")
     parser.add_argument("--api_key", type=str, help="OpenAI API key (or set OPENAI_API_KEY environment variable)")
     parser.add_argument("--model", type=str, default="gpt-4o-mini", help="OpenAI model to use")
-    parser.add_argument("--rct_file", type=str, default="llm_training.csv", help="Reference RCT data file")
     parser.add_argument("--num_samples", type=int, default=30000, help="Total number of samples to generate")
     parser.add_argument("--batch_size", type=int, default=300, help="Batch size for API calls")
     parser.add_argument("--output", type=str, default="optimized_generated_data.csv", help="Output file name")
@@ -474,9 +267,6 @@ if __name__ == "__main__":
     
     # Create generator
     generator = SyntheticDataGenerator(api_key=args.api_key, model=args.model)
-    
-    # Load RCT data
-    generator.load_rct_data(args.rct_file)
     
     # Generate data
     synthetic_data = generator.generate_data(total_samples=args.num_samples, batch_size=args.batch_size)
