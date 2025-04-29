@@ -53,9 +53,7 @@ def run_experiment(config_run, seed_list, methods_list, alpha, llm_obs_path):
         # Set seed for random sampling
         np.random.seed(current_seed)
         
-        # Random sampling for RCT data instead of sequential slicing
-        rct_indices = np.random.choice(len(big_df_rct), size=n_rct, replace=False)
-        df_rct = big_df_rct.iloc[rct_indices]
+        df_rct = big_df_rct.iloc[seed_index * n_rct: (seed_index + 1) * n_rct]
         
         # Random sampling for observational data
         obs_indices = np.random.choice(len(big_df_obs), size=n_obs, replace=False)
@@ -90,7 +88,7 @@ if __name__ == "__main__":
     
     
     methods_list = ["normal_aipw", "normal_ppi", "normal_obs"]
-    llm_obs_path = os.path.join(current_dir, "optimized_generated_data.csv")
+    llm_obs_path = os.path.join(current_dir, "Synthetic_observational.csv")
     
     run_experiment(config_run, seed_list[alpha_index], methods_list, alpha=alpha,
                   llm_obs_path=llm_obs_path)

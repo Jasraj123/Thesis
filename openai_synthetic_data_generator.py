@@ -97,110 +97,127 @@ class SyntheticDataGenerator:
         """Call OpenAI API to generate complete synthetic data with retries."""
         for attempt in range(max_retries):
             try:
+                # Add explicit instructions to the prompt
+                modified_prompt = prompt + "\n\nIMPORTANT: Start your response with ONLY the CSV header 'X,A,y' followed by data rows. Do not include any text descriptions or explanations."
+                
                 response = self.client.chat.completions.create(
                     model=self.model,
                     messages=[
-                        {"role": "system", "content": "You are a helpful assistant that generates synthetic data according to complex data generating processes."},
-                        {"role": "user", "content": prompt}
+                        {"role": "system", "content": "You are a data generator that outputs ONLY CSV data. Do not include any explanations or descriptions."},
+                        {"role": "user", "content": modified_prompt}
                     ],
                     temperature=0.2,
                     max_tokens=4000
                 )
                 
-                # Extract content from response
+                # Extract content and save for debugging
                 content = response.choices[0].message.content
-                
-                # Save raw response for debugging
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 raw_file = self.output_dir / f"raw_synth_response_{timestamp}.txt"
                 with open(raw_file, "w") as f:
                     f.write(content)
                 print(f"Raw synthetic response saved to {raw_file}")
                 
-                # Clean up response if needed
-                if "```" in content:
-                    parts = content.split("```")
-                    for part in parts:
-                        if "," in part and "X" in part and "A" in part:
-                            content = part.strip()
-                            if content.startswith("csv") or content.startswith("CSV"):
-                                content = content[3:].strip()
-                            break
-                
-                # Parse CSV using StringIO
-                df = pd.read_csv(StringIO(content))
-                
-                # Standardize column names
-                column_mapping = {}
-                for col in df.columns:
-                    if col.lower() == 'x': column_mapping[col] = 'X'
-                    elif col.lower() == 'a': column_mapping[col] = 'A'
-                    elif col.lower() == 'y': column_mapping[col] = 'y'
-                
-                if column_mapping:
-                    df = df.rename(columns=column_mapping)
-                
-                # Ensure we have all required columns
-                required_cols = ['X', 'A', 'y']
-                if not all(col in df.columns for col in required_cols):
-                    raise ValueError(f"Missing required columns. Got: {df.columns.tolist()}")
-                
-                # Keep only the required columns
-                df = df[required_cols]
-                
-                # Make sure X is in the right range
-                X_min, X_max = -1.5, 1.5
-                if df['X'].min() < X_min or df['X'].max() > X_max:
-                    print(f"Warning: X values out of expected range [{X_min}, {X_max}]. Clipping values.")
-                    df['X'] = df['X'].clip(X_min, X_max)
-                
-                # Ensure A is binary
-                df['A'] = df['A'].astype(int)
-                
-                # Ensure we have the right number of samples (or fewer)
-                if len(df) > batch_size:
-                    df = df.iloc[:batch_size]
-                
-                # If we get fewer samples than requested, try to generate the remaining
-                if len(df) < batch_size:
-                    remaining = batch_size - len(df)
-                    print(f"Only received {len(df)} samples, generating {remaining} more...")
+                # Find the actual CSV data
+                csv_lines = []
+                # Look for lines that have the correct format (X,A,y pattern)
+                for line in content.split("\n"):
+                    # Skip empty lines and obvious text descriptions
+                    if not line.strip() or line.strip().startswith("Here") or "generated" in line.lower():
+                        continue
                     
-                    remaining_prompt = """
-                    Generate {num_samples} synthetic observational data points using the following data-generating process, which includes unmeasured confounding.
-
-                    Data Generating Process:
-                    1. Generate covariate X from a uniform distribution between -1.5 and 1.5.
-                    2. Introduce an unobserved confounder U from a standard normal distribution.
-                    3. Treatment assignment (A) depends on both X and U:
-                       - Use a logistic function: P(A=1 | X, U) = sigmoid(α * X + β * U + c)
-                       - Choose α, β such that X has a moderate effect and U has a strong confounding effect.
-                    4. The outcome (y) depends nonlinearly on X, U, and A:
-                       - Compute a set of nonlinear features of X (e.g., sinusoids, exponentials, interactions)
-                       - y0 = f(X, U): baseline outcome under control
-                       - Treatment effect varies nonlinearly with X
-                       - y1 = y0 + Δ(X): treated outcome
-                       - Observed outcome y = A * y1 + (1 - A) * y0
-                    5. Add heteroskedastic noise to y:
-                       - Noise variance increases with a nonlinear function of X or U
-
-                    Key Properties:
-                    - Unmeasured confounding is present through U affecting both A and y
-                    - Treatment effect is heterogeneous and nonlinearly related to X
-                    - Average treatment effect is positive (~15 units), i.e., treatment increases y
-                    - The outcome y is continuous
-                    - Maintain complex nonlinear relationships between variables
-
-                    Return ONLY a CSV with columns: X, A, y
-                    """.format(num_samples=remaining)
-                    
-                    try:
-                        additional_response = self._call_openai_for_synthetic_data(remaining_prompt, remaining)
-                        df = pd.concat([df, additional_response], ignore_index=True)
-                    except Exception as e:
-                        print(f"Failed to generate additional samples: {e}")
+                    # Look for CSV header or data rows
+                    if "," in line and (
+                        # Header row check
+                        ("X" in line and "A" in line and "y" in line) or 
+                        # Data row check - contains comma-separated values that could be parsed as numbers
+                        all(part.strip().replace('.', '', 1).replace('-', '', 1).isdigit() 
+                            for part in line.split(",") if part.strip())
+                    ):
+                        csv_lines.append(line)
                 
-                return df
+                if not csv_lines:
+                    # Try to extract from code blocks if direct extraction failed
+                    if "```" in content:
+                        code_blocks = content.split("```")
+                        for block in code_blocks:
+                            if "," in block and ("X" in block or "x" in block):
+                                # Found a potential CSV block
+                                block_lines = block.strip().split("\n")
+                                # Remove any language identifier
+                                if block_lines and (block_lines[0].lower() == "csv" or block_lines[0].strip() == ""):
+                                    block_lines = block_lines[1:]
+                                csv_lines = block_lines
+                                break
+                
+                if not csv_lines:
+                    raise ValueError("Could not extract CSV data from response")
+                
+                # Create a string of just the CSV content and parse it
+                csv_content = "\n".join(csv_lines)
+                
+                # For debugging
+                print(f"Extracted CSV content:\n{csv_content[:200]}...")
+                
+                try:
+                    df = pd.read_csv(StringIO(csv_content))
+                    
+                    # Clean up column names - they may have leading/trailing spaces
+                    df.columns = [col.strip() for col in df.columns]
+                    
+                    # Find the X, A, y columns by name (case insensitive)
+                    column_mapping = {}
+                    for col in df.columns:
+                        if col.lower() == 'x': column_mapping[col] = 'X'
+                        elif col.lower() == 'a': column_mapping[col] = 'A'
+                        elif col.lower() == 'y': column_mapping[col] = 'y'
+                    
+                    if column_mapping:
+                        df = df.rename(columns=column_mapping)
+                    
+                    # Fall back to positional columns if we still don't have them
+                    if not all(col in df.columns for col in ['X', 'A', 'y']):
+                        if len(df.columns) >= 3:
+                            # Use the first three columns, assuming they are X, A, y
+                            df = df.iloc[:, :3]
+                            df.columns = ['X', 'A', 'y']
+                        else:
+                            raise ValueError(f"Not enough columns in CSV: {df.columns}")
+                    
+                    # Keep only the required columns in the right order
+                    df = df[['X', 'A', 'y']]
+                    
+                    # Convert to numeric and clean
+                    for col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors='coerce')
+                    
+                    # Drop NaN rows
+                    original_len = len(df)
+                    df = df.dropna()
+                    if len(df) < original_len:
+                        print(f"Dropped {original_len - len(df)} rows with invalid/NaN values")
+                    
+                    # Make sure X is in expected range
+                    df['X'] = df['X'].clip(-1.5, 1.5)
+                    
+                    # Ensure A is binary
+                    df['A'] = (df['A'] > 0.5).astype(int)
+                    
+                    # Check if we have any valid data
+                    if len(df) == 0:
+                        raise ValueError("No valid data rows after processing")
+                    
+                    # Ensure we have the right number of samples (or fewer)
+                    if len(df) > batch_size:
+                        df = df.iloc[:batch_size]
+                    
+                    print(f"Successfully extracted {len(df)} valid data points")
+                    return df
+                
+                except Exception as e:
+                    print(f"Error parsing CSV data: {e}")
+                    print(f"CSV content that failed to parse: {csv_content[:500]}...")
+                    raise
             
             except Exception as e:
                 print(f"Error on attempt {attempt+1}/{max_retries}: {e}")
