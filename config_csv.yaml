@@ -1,6 +1,6 @@
 data:
-  n_rct: 1000
-  n_obs: 20000
+  n_rct: 700
+  n_obs: 10000
   n_MC: 100000
   covairate_name: ["AGE", "RSBP", "ST1PE"]
   alpha: 0.1

@@ -352,11 +352,21 @@ def get_estimates(dataset_train, dataset_val, delta, significance_level = 0.05):
     
     y_N_train = Y_N_train.reshape(N_train)
     est_2.fit(y_N_train, T_N_train, X=X_N_train)
-
-    cate_N = est_2.effect(X_N_eval)
-    ate_N = np.mean(cate_N)
-    var_N = np.var(cate_N)
+    print(f"X_N_train shape: {X_N_train.shape}")
+    print(f"T_N_train shape: {T_N_train.shape}")
+    print(f"Y_N_train shape: {Y_N_train.shape}")
+   
     
+    cate_N = est_2.effect(X_N_eval)
+    print(f"cate_N shape: {cate_N.shape}")
+    print(f"cate_N first 5 rows: {cate_N[:5]}")
+
+    ate_N = np.mean(cate_N)
+    print(f"ate_N shape: {ate_N.shape}")
+    var_N = np.var(cate_N)
+    print(f"var_N shape: {var_N.shape}")
+    
+
     print(f"ATE from obs data: {ate_N:.4f}")
     print(f"Variance of CATE estimates: {var_N:.4f}")
     

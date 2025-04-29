@@ -12,7 +12,7 @@ import os, json, itertools
 
 class SyntheticDataModule:
     def __init__(self,
-                n_rct=200,
+                n_rct=800,
                 n_MC=100000,
                 covs=["X"],  # Keep X as the primary covariate for compatibility
                 X_range=np.linspace(-1, 1, 51),
@@ -165,12 +165,14 @@ class SyntheticDataModule:
         
 #     base_generator = SyntheticDataModule(n_rct=n_samples, seed=seed)
     
-#     X = np.random.beta(2, 3, size=n_samples) * 3 - 1.5  # More skewed than uniform
+#     # Use the same distribution as RCT data instead of beta
+#     X = np.random.uniform(-1.5, 1.5, size=n_samples)
     
-#     # unmeasured confounders 
-#     U = np.random.normal(0, 1, size=n_samples)
+#     # Unmeasured confounders with REDUCED impact
+#     U = np.random.normal(0, 0.5, size=n_samples)  # Reduced variance
     
-#     propensity = expit(0.5 * X + 0.7 * U)
+#     # Reduce the influence of U on treatment assignment
+#     propensity = expit(0.3 * X + 0.2 * U)  # Reduced coefficients
 #     A = np.random.binomial(1, propensity)
     
 #     n = len(X)
@@ -198,14 +200,16 @@ class SyntheticDataModule:
 #         for j in range(i+1, 3):
 #             features[:, 4] += interaction_weights[i, j] * X_matrix[:, i] * X_matrix[:, j]
     
-#     # Base effect similar but with additional U influence
-#     treatment_effect = 15.0 + 3.0 * features[:, 0] + 2.5 * features[:, 3] + 1.0 * U
+#     # Base effect with REDUCED influence from U
+#     treatment_effect = 15.0 + 3.0 * features[:, 0] + 2.5 * features[:, 3] + 0.3 * U  # Reduced U coefficient
     
-#     y0 = 5.0 * features[:, 0] + 3.0 * features[:, 1] + 7.0 * features[:, 2] + 2.0 * features[:, 4] - 2.0 * U
+#     # Base outcome with REDUCED influence from U
+#     y0 = 5.0 * features[:, 0] + 3.0 * features[:, 1] + 7.0 * features[:, 2] + 2.0 * features[:, 4] - 0.5 * U  # Reduced U coefficient
     
 #     y1 = y0 + treatment_effect
     
-#     noise_scale = 0.5 + 0.5 * np.abs(features[:, 2]) + 0.3 * np.abs(U)
+#     # Reduced influence of U on noise
+#     noise_scale = 0.5 + 0.5 * np.abs(features[:, 2]) + 0.1 * np.abs(U)  # Reduced U coefficient
 #     noise = np.random.normal(0, noise_scale, size=n)
     
 #     Y = np.where(A == 1, y1, y0) + noise
@@ -218,11 +222,11 @@ class SyntheticDataModule:
     
 #     large_df.to_csv(output_file, index=False)
 #     print(f"Saved large observational dataset to {output_file}")
-#     print("Key differences from RCT data:")
-#     print(" - Beta distribution for covariates instead of uniform")
-#     print(" - Treatment assignment depends on covariates and unmeasured confounders")
-#     print(" - Unmeasured confounders affect both treatment assignment and outcomes")
-#     print(" - Modified treatment effect heterogeneity")
+#     print("Modified observational data to reduce confounding:")
+#     print(" - Uniform distribution for covariates (matched to RCT)")
+#     print(" - Reduced influence of unmeasured confounders on treatment assignment")
+#     print(" - Reduced influence of unmeasured confounders on outcomes")
+#     print(" - Maintained treatment effect heterogeneity pattern")
     
 #     return large_df
 

@@ -62,33 +62,7 @@ def data_generation(all_covs, n_rct, n_MC, X_range, pasx, seed, df_obs=None):
     return mean_trail, df_comp_big, df_obs_out
 
 def tune_model(model, param_grid, X, y, scoring, cv=3, verbose=1, n_iter=10):
-    """
-    Tune model hyperparameters using RandomizedSearchCV.
-    
-    Parameters:
-    -----------
-    model : estimator object
-        The model to tune
-    param_grid : dict
-        Dictionary with parameters names as keys and lists of parameter values
-    X : array-like
-        Training data
-    y : array-like
-        Target values
-    scoring : string
-        Scoring method for model evaluation
-    cv : int, default=3
-        Number of cross-validation folds
-    verbose : int, default=1
-        Verbosity level
-    n_iter : int, default=10
-        Number of parameter settings sampled
-        
-    Returns:
-    --------
-    best_model : estimator object
-        The best model found by RandomizedSearchCV
-    """
+  
     random_search = RandomizedSearchCV(
         model, param_grid, scoring=scoring, cv=cv, verbose=verbose, 
         n_jobs=-1, n_iter=n_iter, random_state=42
@@ -208,7 +182,7 @@ def estimate_mu(X, A, y, model_y=None):
     print(f"\n------ OUTCOME MODEL DEBUG ------")
     print(f"Outcome model fit metrics:")
     print(f"  - R² score: {r2:.4f} (higher is better, > 0.5 is reasonable)")
-    print(f"  - RMSE: {rmse:.4f} (lower is better, depends on outcome scale)")
+    print(f"  - RMSE: {rmse:.4f} (lower is better)")
     
     # Calculate and print residuals summary
     residuals = y - y_pred
@@ -251,8 +225,8 @@ def get_estimates(dataset_train, dataset_val, delta, significance_level=0.05):
     A_flat = A_train.flatten()
     Y_flat = Y_train.flatten()
     e_flat = e.flatten()
-    mu0_flat = np.array(mu0).flatten()
-    mu1_flat = np.array(mu1).flatten()
+    mu0_flat = mu0
+    mu1_flat = mu1
     
     aipw_term1 = (A_flat * Y_flat / e_flat) - ((1 - A_flat) * Y_flat / (1 - e_flat))
     aipw_term2 = ((A_flat - e_flat) / e_flat * (1 - e_flat)) * ((1-e_flat) * mu1_flat + e_flat * mu0_flat)
