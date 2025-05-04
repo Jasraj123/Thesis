@@ -13,7 +13,6 @@ from sklearn.ensemble import GradientBoostingRegressor, GradientBoostingClassifi
 from sklearn.linear_model import LogisticRegression, LinearRegression
 from synthetic_data_generation import *
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV, train_test_split
-from sklearn.dummy import DummyRegressor, DummyClassifier
 from sklearn.calibration import CalibratedClassifierCV
 from xgboost import XGBRegressor, XGBClassifier
 from sklearn.metrics import roc_auc_score, brier_score_loss, log_loss, r2_score, mean_squared_error
@@ -120,8 +119,6 @@ def estimate_e(X, A, model_e=None):
 
     e = model_e.fit(X, A.ravel()).predict_proba(X)[:, 1]
     
-    # Add these debug statements to check propensity model fit
-    y_pred = model_e.predict(X)
     auc = roc_auc_score(A, e)
     brier = brier_score_loss(A, e)
     logloss = log_loss(A, e)

@@ -52,35 +52,36 @@ class SyntheticDataGenerator:
             batch_size_actual = min(batch_size, remaining_samples)
             print(f"Generating batch of {batch_size_actual} samples ({remaining_samples} remaining)...")
             
-            prompt = """
-            Generate {num_samples} synthetic observational data points using the following data-generating process, which includes unmeasured confounding.
+            prompt = f"""
+                Generate {batch_size_actual} synthetic observational data points. Return a CSV with exactly three columns: X, A, y.
 
-            Data Generating Process:
-            1. Generate covariate X from a uniform distribution between -1.5 and 1.5.
-            2. Introduce an unobserved confounder U from a standard normal distribution.
-            3. Treatment assignment (A) depends on both X and U:
-               - Use a logistic function: P(A=1 | X, U) = sigmoid(α * X + β * U + c)
-               - Choose α, β such that X has a moderate effect and U has a strong confounding effect.
-            4. The outcome (y) depends nonlinearly on X, U, and A:
-               - Compute a set of nonlinear features of X (e.g., sinusoids, exponentials, interactions)
-               - y0 = f(X, U): baseline outcome under control
-               - Treatment effect varies nonlinearly with X
-               - y1 = y0 + Δ(X): treated outcome
-               - Observed outcome y = A * y1 + (1 - A) * y0
-            5. Add heteroskedastic noise to y:
-               - Noise variance increases with a nonlinear function of X or U
+                Data generation steps:
+                1. Sample covariate X ~ Uniform(-1.5, 1.5)
+                2. Sample unobserved confounder U ~ Normal(0, 1.5)  # Do NOT include U in the output
+                3. Compute additional covariates:
+                - X1 = X + Normal(0, 0.1)
+                - X2 = X^2 + Normal(0, 0.15)
+                - X3 = sin(2 * X) + Normal(0, 0.2)
+                4. Treatment assignment A ~ Bernoulli(p), where p = sigmoid(0.6 * X + 0.2 * U)
+                5. Compute outcome components:
+                - y0 = 3 + 2 * X + 1.5 * X1 - 2 * X2 + 1.8 * cos(X)
+                        + 0.5 * X * X1 + 0.2 * X2 * X3
+                        + 0.5 * (X > 0) * sin(5 * X)
+                        + 1.1 * cos(X^2) + 0.6 * sin(exp(0.7 * X^2)) - 0.6 * U
+                - treatment_effect = 3 + 1.5 * X + 2 * X2 + 0.7 * sin(1.5 * X)
+                        - 1 * X3 + 0.6 * (X > 0.5) * tanh(3 * X)
+                        + 0.8 * (X < -0.5) * tanh(4 * X)
+                        + 0.4 * X * sin(2.5 * X) + Normal(0, 0.3) + 0.7 * U
+                - y1 = y0 + treatment_effect
+                6. Add heteroskedastic noise ε ~ Normal(0, noise_scale), where:
+                noise_scale = 0.25 + 0.3 * abs(sin(2.5 * X)) + 0.4 * (X > 1.0) + 0.3 * abs(U)
+                7. Final observed outcome: y = A * y1 + (1 - A) * y0 + ε
 
-            Key Properties:
-            - Unmeasured confounding is present through U affecting both A and y
-            - Treatment effect is heterogeneous and nonlinearly related to X
-            - Average treatment effect is positive (~15 units), i.e., treatment increases y
-            - The outcome y is continuous
-            - Maintain complex nonlinear relationships between variables
+                Output ONLY the CSV with three columns in order: X,A,y
 
-            Return ONLY a CSV with columns: X, A, y
+                IMPORTANT: Do not include any explanations or preamble. Begin your response with the CSV header: X,A,y
             """.format(num_samples=batch_size_actual)
             
-            # Generate batch of synthetic data
             response = self._call_openai_for_synthetic_data(prompt, batch_size_actual)
             data_list.append(response)
             remaining_samples -= len(response)
@@ -120,7 +121,6 @@ class SyntheticDataGenerator:
                 
                 # Find the actual CSV data
                 csv_lines = []
-                # Look for lines that have the correct format (X,A,y pattern)
                 for line in content.split("\n"):
                     # Skip empty lines and obvious text descriptions
                     if not line.strip() or line.strip().startswith("Here") or "generated" in line.lower():
@@ -165,7 +165,6 @@ class SyntheticDataGenerator:
                     # Clean up column names - they may have leading/trailing spaces
                     df.columns = [col.strip() for col in df.columns]
                     
-                    # Find the X, A, y columns by name (case insensitive)
                     column_mapping = {}
                     for col in df.columns:
                         if col.lower() == 'x': column_mapping[col] = 'X'
@@ -178,7 +177,6 @@ class SyntheticDataGenerator:
                     # Fall back to positional columns if we still don't have them
                     if not all(col in df.columns for col in ['X', 'A', 'y']):
                         if len(df.columns) >= 3:
-                            # Use the first three columns, assuming they are X, A, y
                             df = df.iloc[:, :3]
                             df.columns = ['X', 'A', 'y']
                         else:
@@ -277,7 +275,7 @@ if __name__ == "__main__":
     parser.add_argument("--api_key", type=str, help="OpenAI API key (or set OPENAI_API_KEY environment variable)")
     parser.add_argument("--model", type=str, default="gpt-4o-mini", help="OpenAI model to use")
     parser.add_argument("--num_samples", type=int, default=30000, help="Total number of samples to generate")
-    parser.add_argument("--batch_size", type=int, default=300, help="Batch size for API calls")
+    parser.add_argument("--batch_size", type=int, default=500, help="Batch size for API calls")
     parser.add_argument("--output", type=str, default="optimized_generated_data.csv", help="Output file name")
     
     args = parser.parse_args()

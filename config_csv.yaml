@@ -1,13 +1,13 @@
 data:
   n_rct: 700
-  n_obs: 10000
+  n_obs: 15000
   n_MC: 100000
   covairate_name: ["AGE", "RSBP", "ST1PE"]
-  alpha: 0.1
-  delta: 0.5
+  alpha: 0.1     
+  delta: 0.1
   data_seed: 42
-  rct_csv_path: "trial_master.csv"
-  obs_csv_path: "trial_master.csv"
+  rct_csv_path: "trial_master01.csv"
+  obs_csv_path: "stroke_study_30000.csv"
 
 pasx:
   lb: 0.1

@@ -1,0 +1,49 @@
+data:
+  covairate_name: ["X", "U"]  
+  x_dim: 2
+  n_rct: 100
+  n_obs: 5000
+  n_MC: 10000
+  X_range: [-1, 1, 51]  
+  U_range: [-1, 1, 51]
+  data_seed: 17
+
+  alpha: 0.05
+  delta: 0.65
+
+  om_A0_par:    # GP parameters for FOM_0
+    ls: [1,1]
+    alpha: [1,1]
+    kernel: "rbf"
+
+  om_A1_par:      # GP parameters for FOM_1
+    ls: [0.5, 0.5]
+    alpha: [5, 5]
+    kernel: "rbf"
+
+  w_sel_par:      # Nested trial participation P(S=1 | X,U) GP parameters
+    ls: [1, 1000000]
+    alpha: [0, 0]
+    kernel: "rbf"
+
+  w_trt_par:      # OS treatment assignment P(A=1 | S=2, X,U) GP parameters
+    0:
+      ls: [1000000, 1000000]
+      alpha: [0, 0]
+      kernel: "rbf"
+    1:
+      ls: [1000000, 0.5]
+      alpha: [0, 0]
+      kernel: "rbf"
+    2: 
+      ls: [1000000,0.5]
+      alpha: [0, 10]
+      kernel: "rbf"
+  
+pasx:
+  lb: 0.1
+  ub: 0.9
+  trial: 0.5
+
+relative_path: 
+  "code/RCT_data/experiments_u/"
