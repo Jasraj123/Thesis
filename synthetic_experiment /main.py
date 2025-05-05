@@ -86,7 +86,7 @@ if __name__ == "__main__":
     
     
     methods_list = ["normal_aipw", "normal_ppi", "normal_obs"]
-    llm_obs_path = os.path.join(current_dir, "observational_data.csv")
+    llm_obs_path = os.path.join(current_dir, "gpt4o_synthetic.csv")
     
     run_experiment(config_run, seed_list[alpha_index], methods_list, alpha=alpha,
                   llm_obs_path=llm_obs_path)

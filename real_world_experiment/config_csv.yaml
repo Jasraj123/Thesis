@@ -3,11 +3,11 @@ data:
   n_obs: 15000
   n_MC: 100000
   covariate_name: ["AGE", "RSBP", "ST1PE"]
-  alpha: 0.05  
+  alpha: 0.1  
   delta: 0.1
   data_seed: 42
-  rct_csv_path: "trial_master01.csv"
-  obs_csv_path: "gpt_4_real01.csv"
+  rct_csv_path: "/Users/RajNeeti/Desktop/Thesis/real_world_experiment/trial_master01.csv"
+  obs_csv_path: "/Users/RajNeeti/Desktop/Thesis/real_world_experiment/gpt_4_real01.csv"
 
 pasx:
   lb: 0.1

@@ -42,7 +42,7 @@ seed_list_dic = {
 def plot_results(exp_name="csv_data"):
     """Plot the experimental results comparing different methods."""
     
-    fig, ax = plt.subplots(2, 1, figsize=(4, 6))
+    fig, ax = plt.subplots(2, 1, figsize=(3, 5))
     
     for alpha_index in range(len(alpha_list)):
         # Read directory where results are stored

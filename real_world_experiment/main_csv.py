@@ -71,8 +71,8 @@ def run_experiment(config_run, seed_list, methods_list, alpha):
 
 if __name__ == "__main__":
     seed_list = [
-        list(range(0, 20, 2)),  # Seeds for alpha=0.05 
-        list(range(1, 20, 2))   # Seeds for alpha=0.1
+        list(range(0, 18, 2)),  # Seeds for alpha=0.05 
+        list(range(1, 18, 2))   # Seeds for alpha=0.1
     ]    
 
     # Get the current directory where main_csv.py is located
