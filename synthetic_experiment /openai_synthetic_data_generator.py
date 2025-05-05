@@ -11,7 +11,7 @@ from io import StringIO
 from key import OPENAI_API_KEY
 
 class SyntheticDataGenerator:
-    def __init__(self, api_key=None, model="gpt-4o-mini"):
+    def __init__(self, api_key=None, model="gpt-4o"):
         api_key = OPENAI_API_KEY
         
         self.api_key = api_key
@@ -273,7 +273,7 @@ class SyntheticDataGenerator:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate synthetic data purely from prompts")
     parser.add_argument("--api_key", type=str, help="OpenAI API key (or set OPENAI_API_KEY environment variable)")
-    parser.add_argument("--model", type=str, default="gpt-4o-mini", help="OpenAI model to use")
+    parser.add_argument("--model", type=str, default="gpt-4o", help="OpenAI model to use")
     parser.add_argument("--num_samples", type=int, default=30000, help="Total number of samples to generate")
     parser.add_argument("--batch_size", type=int, default=500, help="Batch size for API calls")
     parser.add_argument("--output", type=str, default="optimized_generated_data.csv", help="Output file name")
