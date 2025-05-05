@@ -26,7 +26,6 @@ tick_dic = {
     "normal_obs": 0.8
 }
 
-'''rct/obs faithfulness'''
 name_list = ["normal_ppi", "normal_aipw", "normal_obs"]
 seq_dic = {"normal_aipw": 0, "normal_ppi": 1, "normal_obs": 2}
 
@@ -98,71 +97,3 @@ legend_dic[label_dic['True ATE']] = unique[label_dic['True ATE']]
 fig.legend(legend_dic.values(), legend_dic.keys(), loc='lower center', bbox_to_anchor=(0.5, -0.07), ncol=6, fontsize=font_size-2)
 plt.tight_layout()
 plt.savefig(f"{path}/figs/results/{exp_name}/experiments_u.pdf", bbox_inches="tight")
-
-
-# '''rct/obs width'''
-
-# exp_name = "rct_data" # "synthetic_data", "rct_data", "synthetic_data_multi", "synthetic_data_ass", "synthetic_data_XGBoost", "synthetic_data_dependence"
-# name_list = ["normal_ppi", "normal_aipw", "normal_obs"]
-# read_dir = f"{path}/code/{exp_name}/experiments_n/exp_results/"
-
-# seed_list = [0, 1, 2, 3, 4]
-# scenario_list = ["scenario_1", "scenario_2", "scenario_3"]
-# scenario_name_dic = {"scenario_1": "Scenario 1","scenario_2": "Scenario 2", "scenario_3": "Scenario 3"}
-# sample_list = ["small_n", "ratio", "large_N"]
-# sample_title_dic = {"small_n": "N = 5000", "ratio": "n/N = 1/50", "large_N": "n = 200"}
-
-# fig, ax = plt.subplots(3, 3, figsize=(8, 6))
-
-# for scenario_name, sample_name in itertools.product(scenario_list, sample_list):
-#     scenario_index = scenario_list.index(scenario_name)
-#     sample_index = sample_list.index(sample_name)
-
-#     width_list = [[] for i in range(len(name_list))]
-#     for seed in seed_list:
-#         df = pd.read_csv(f"{read_dir}/{scenario_name}/{sample_name}/estimates_{seed}.csv")
-#         for name in name_list:
-#             width_list[name_list.index(name)].append(np.array(df[name + '_width'].tolist()).reshape(-1, 1))
-
-#     for name in name_list:
-#         i = name_list.index(name)
-#         if sample_name == "large_N":
-#             x_visual = np.array(df['n_obs'].to_list())
-#         else:
-#             x_visual = np.array(df['n_rct'].to_list())
-#         width = width_list[i]
-#         width = np.concatenate(width, axis = 1)
-#         width_mean = np.mean(width, axis = 1)
-#         width_std = np.std(width, axis = 1)
-#         if name == "normal_obs":
-
-#             ax[sample_index, scenario_index].plot(x_visual, width_mean, linestyle = 'dashed', label = label_dic[name], color = color_dic[name])
-#         else:
-#             ax[sample_index, scenario_index].plot(x_visual, width_mean, label = label_dic[name], color = color_dic[name])
-#             ax[sample_index, scenario_index].fill_between(x_visual, width_mean - width_std, width_mean + width_std, alpha = 0.3, color = color_dic[name])
-
-
-#     if sample_name == "large_N":
-#         ax[sample_index, scenario_index].set_xlabel("N", fontsize=font_size-3)
-#     else:
-#         ax[sample_index, scenario_index].set_xlabel("n", fontsize=font_size-3)
-
-#     if scenario_name == "scenario_1":
-#         ax[sample_index, scenario_index].set_ylabel("Width", fontsize=font_size-2)
-#         ax[sample_index, scenario_index,].text(-0.4, 0.5, sample_title_dic[sample_name], rotation=90, verticalalignment='center', horizontalalignment='center', transform=ax[sample_index, scenario_index].transAxes, fontsize=font_size)
-#     else:
-#         ax[sample_index, scenario_index].set_yticks([])
-#         # pass
-
-#     ax[sample_index, scenario_index].set_ylim([0, 1])
-
-#     if sample_name == "small_n":
-#         ax[sample_index, scenario_index].set_title(scenario_name_dic[scenario_name], fontsize=font_size)
-
-#     handles, labels = ax[sample_index, scenario_index].get_legend_handles_labels()
-
-# unique = dict(zip(labels, handles))
-# fig.legend(unique.values(), unique.keys(), loc='lower center', bbox_to_anchor=(0.5, -0.06), ncol=3, fontsize=font_size-2)
-# plt.tight_layout()
-# plt.savefig(f"{path}/figs/results/{exp_name}/experiments_n.pdf", bbox_inches="tight")
-# plt.show()

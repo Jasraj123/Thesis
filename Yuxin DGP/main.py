@@ -26,7 +26,7 @@ def run_experiment(config_run, seed_list, methods_list, alpha):
     om_A0_par_list = [config_run['data']['om_A0_par']]
     om_A1_par_list = [config_run['data']['om_A1_par']]
     w_sel_par_list = [config_run['data']['w_sel_par']]
-    w_trt_par_list = [config_run['data']['w_trt_par'][i] for i in range(len(config_run['data']['w_trt_par']))]
+    w_trt_par_list = [config_run['data']['w_trt_par'][0]]
 
     pasx = config_run['pasx']
 
@@ -60,6 +60,8 @@ if __name__ == "__main__":
     alpha_list = [0.05, 0.1]
     methods_list = ["normal_aipw", "normal_ppi", "normal_obs"]
     config_run = load_yaml("/Yuxin DGP/config")
+    
+    config_run['relative_path'] = "Yuxin DGP"
 
     for alpha_index in [1]:
         run_experiment(config_run, seed_list[alpha_index], methods_list, alpha=alpha_list[alpha_index])
