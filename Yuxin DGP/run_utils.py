@@ -1,4 +1,3 @@
-import random
 import sys, os, yaml
 sys.path.insert(1, os.path.join(sys.path[0], '..'))
 
@@ -9,16 +8,17 @@ from scipy.stats import norm
 from scipy import interpolate
 from pathlib import Path
 from econml.dr import LinearDRLearner, ForestDRLearner
-
-from sklearn.ensemble import GradientBoostingRegressor, GradientBoostingClassifier, RandomForestRegressor
+from sklearn.ensemble import GradientBoostingRegressor, GradientBoostingClassifier
+from sklearn.linear_model import LogisticRegression, LinearRegression
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV, train_test_split
-from sklearn.metrics import roc_auc_score, r2_score, mean_squared_error
 from sklearn.calibration import CalibratedClassifierCV
 from xgboost import XGBRegressor, XGBClassifier
+from synthetic_data_generation import *
 
 def set_seed(seed):
     random.seed(seed)
     np.random.seed(seed)
+    # torch.manual_seed(seed)
 
 def get_project_path():
     path = Path(os.path.dirname(os.path.realpath(__file__)))
@@ -41,6 +41,27 @@ def save_yaml(path_relative, file):
     with open(get_project_path() + path_relative + ".yaml", 'w') as outfile:
         yaml.dump(file, outfile, default_flow_style=False)
 
+
+def rbf_linear_kernel(X1, X2, length_scales=np.array([0.1,0.1]), alpha=np.array([0.1,0.1]), var=5):  # works with 2D covariates only
+    distances = np.linalg.norm((X1[:, None, :] - X2[None, :, :]) / length_scales, axis=2)
+    rbf_term = var * np.exp(-0.5 * distances**2)
+    linear_term = np.dot(np.dot(X1, np.diag(alpha)), X2.T)
+    return rbf_term + linear_term
+
+def data_generation(gp_params, all_covs, big_n_rct, big_n_obs, n_MC, X_range, U_range, pasx, seed):
+    gp_funcs = {}
+
+    gp_funcs["om_A0"] = sample_outcome_model_gp(X_range, U_range, gp_params["om_A0_par"], seed + 0)  # GP - outcome model under treatment A=0
+    gp_funcs["om_A1"] = sample_outcome_model_gp(X_range, U_range, gp_params["om_A1_par"], seed + 1)  # GP - outcome model under treatment A=1
+    gp_funcs["w_sel"] = sample_outcome_model_gp(X_range, U_range, gp_params["w_sel_par"], seed + 2)  # GP - selection score model P(S=1|X)
+    gp_funcs["w_trt"] = sample_outcome_model_gp(X_range, U_range, gp_params["w_trt_par"], seed + 3)  # GP - propensity score in OBS study P(A=1|X, S=2)
+
+    SyntheticData = SyntheticDataModule(big_n_rct, big_n_obs, n_MC, gp_funcs, all_covs, X_range, U_range, pasx, seed + 4)
+    mean_trail, _ = SyntheticData.get_true_mean()
+    df_comp_big, df_obs = SyntheticData.get_df() 
+
+    return mean_trail, df_comp_big, df_obs
+
 def tune_model(model, param_grid, X, y, scoring, cv=5, verbose=1, n_iter=20):
   
     random_search = RandomizedSearchCV(
@@ -50,17 +71,36 @@ def tune_model(model, param_grid, X, y, scoring, cv=5, verbose=1, n_iter=20):
     random_search.fit(X, y)
     
     print(f"Best parameters: {random_search.best_params_}")
+    print(f"Best score: {random_search.best_score_:.4f}")
     
     return random_search.best_estimator_
 
+def sample_outcome_model_gp(X, U, param, seed):  # works with 2D covariates only
+
+    np.random.seed(seed)
+    XX, UU = np.meshgrid(X, U)
+    XU_flat = np.c_[XX.ravel(), UU.ravel()]
+
+    mean = np.zeros(len(XU_flat))
+
+    if param["kernel"] == "rbf":
+        K = rbf_linear_kernel(XU_flat, XU_flat, np.array(param["ls"]), np.array(param["alpha"]))
+
+    f_sample = np.random.multivariate_normal(mean, K)
+    Y = f_sample.reshape(XX.shape)
+
+    # gp_func = interpolate.interp2d(X, U, Y, kind="linear")
+    gp_func = interpolate.RectBivariateSpline(X, U, Y.T)
+
+    return gp_func
+
 def estimate_e(X, A, model_e=None):
     '''
-        Estimate propensity score using a regularized model_e
+        Estimate propensity score using a model_e
     '''
-    print(f"X shape: {X.shape}, A shape: {A.shape}")
-    
     if model_e is None:
         class_weight = float(np.sum(A == 0) / np.sum(A == 1))
+        print(f"Class imbalance ratio (control/treatment): {class_weight:.4f}")
         
         param_grid = {
             'n_estimators': [100, 200, 300, 500, 700, 1000],
@@ -96,29 +136,17 @@ def estimate_e(X, A, model_e=None):
             cv=5
         )
 
-    e = model_e.fit(X, A.ravel()).predict_proba(X)[:, 1]
-    
-    auc = roc_auc_score(A, e)
-    
-    print(f"  - AUC-ROC: {auc:.4f}")
-    
-    print(f"  - Min: {np.min(e):.4f}, Max: {np.max(e):.4f}")
-    print(f"  - Mean: {np.mean(e):.4f}, Std: {np.std(e):.4f}")
-    
-    extreme_props = np.sum((e < 0.1) | (e > 0.9)) / len(e)
-    print(f"  - Proportion of extreme propensity scores (<0.1 or >0.9): {extreme_props:.4f}")
-    
+    e = model_e.fit(X, A).predict_proba(X)[:, 1]
     return e.reshape(-1, 1)
-
 
 def estimate_mu(X, A, y, model_y=None):
     '''
-    Estimate response function using a regularized and tuned model
+        Estimate response function using a model_y
     '''
     train_data = np.concatenate((X, A), axis=1)
-    
+
     if model_y is None:
-        # hyperparameter tuning
+        # Default outcome model with hyperparameter tuning
         param_grid = {
             'n_estimators': [100, 200, 300, 500, 700, 1000],
             'max_depth': [2, 3, 4, 5, 6, 7, 8, 10],
@@ -148,91 +176,66 @@ def estimate_mu(X, A, y, model_y=None):
         )
     
     mu = model_y.fit(train_data, y.reshape(-1, 1))
-    
-    y_pred = mu.predict(train_data)
-    r2 = r2_score(y, y_pred)
-    rmse = np.sqrt(mean_squared_error(y, y_pred))
-    
-    print(f"  - R² score: {r2:.4f} ")
-    print(f"  - RMSE: {rmse:.4f}")
-        
     test_0 = np.concatenate((X, np.zeros_like(A)), axis=1)
     test_1 = np.concatenate((X, np.ones_like(A)), axis=1)
     mu0 = mu.predict(test_0)
     mu1 = mu.predict(test_1)
-        
+
     return mu0, mu1
 
 
 def get_estimates(dataset_train, dataset_val, delta, significance_level = 0.05):
-    '''Param setting'''
-    print(f"Dataset train shape: {dataset_train.shape}")
-    print(f"Dataset validation shape: {dataset_val.shape}")
-    
+
+    '''Param settinig'''
     alpha = significance_level
     z_alpha = norm.ppf(1 - alpha/2)
-    Y_train = np.array(dataset_train['y']).reshape(-1, 1)
+    Y_train = np.stack(np.array(dataset_train['y']))
     A_train = np.array(dataset_train['A']).reshape(-1, 1)
-    
-    if 'X' in dataset_train.columns:
-        X_train = np.array(dataset_train['X']).reshape(-1, 1)
-    else:
-        covariate_cols = [col for col in dataset_train.columns 
-                          if col not in ['y', 'A', 'Y0', 'Y1']]
-        X_train = np.array(dataset_train[covariate_cols])
-    
+    X_train = np.array(dataset_train['X']).reshape(-1, 1)
     n = Y_train.shape[0]
-    print(f"Sample size n: {n}")
-    
-    '''Normal/Asymptotic setting: AIPW'''
+    d = X_train.shape[1]
+
+    '''IPW Implementation test'''
     e = estimate_e(X_train, A_train)
     mu0, mu1 = estimate_mu(X_train, A_train, Y_train)
-    
     A_flat = A_train.flatten()
     Y_flat = Y_train.flatten()
     e_flat = e.flatten()
+    mu0_flat = mu0
+    mu1_flat = mu1
     
     aipw_term1 = (A_flat * Y_flat / e_flat) - ((1 - A_flat) * Y_flat / (1 - e_flat))
-    aipw_term2 = ((A_flat - e_flat) / e_flat * (1 - e_flat)) * ((1-e_flat) * mu1 + e_flat * mu0)
+    aipw_term2 = ((A_flat - e_flat) / e_flat * (1 - e_flat)) * ((1-e_flat) * mu1_flat + e_flat * mu0_flat)
     aipw = (aipw_term1 - aipw_term2).reshape(-1, 1)
-
+    
     print(f"Shape of A_train: {A_train.shape}")
     print(f"Shape of Y_train: {Y_train.shape}")
     print(f"Shape of e: {e.shape}")
+    print(f"Shape of mu0: {np.array(mu0).shape}")
+    print(f"Shape of mu1: {np.array(mu1).shape}")
     print(f"Corrected shape of AIPW: {aipw.shape}")
-    
+
     ate_est_aipw = np.mean(aipw)
     ate_ci_aipw = (ate_est_aipw - z_alpha * np.sqrt(np.var(aipw)/n), ate_est_aipw + z_alpha * np.sqrt(np.var(aipw)/n))
-    
-    print(f"AIPW variance: {np.var(aipw):.4f}")
-    print(f"AIPW estimate: {ate_est_aipw:.4f}")
-    print(f"AIPW CI: {ate_ci_aipw}")
-    print(f"AIPW CI width: {ate_ci_aipw[1] - ate_ci_aipw[0]:.4f}")
+    print("var_aipw", np.var(aipw))
+    print("ate_est_aipw", ate_est_aipw)
+    print("ate_ci_aipw", ate_ci_aipw)
 
-    '''PPI Implementation'''
-    N = np.array(dataset_val['y']).shape[0]
+    '''Normal/Asymptotic setting + PPI '''
+    N = np.stack(np.array(dataset_val['y'])).shape[0]
     N_train = int(N/2)
     N_eval = N - N_train
+    Y_N_train = np.stack(np.array(dataset_val['y']))[:N_train, :]
+    T_N_train = np.array(dataset_val['A']).reshape(-1, 1)[:N_train, :]
+    X_N_train = np.array(dataset_val['X']).reshape(-1, 1)[:N_train, :]
+    X_N_eval = np.array(dataset_val['X']).reshape(-1, 1)[N_train:, :]
+    T_N_eval = np.array(dataset_val['A']).reshape(-1, 1)[N_train:, :]
+    Y_N_eval = np.stack(np.array(dataset_val['y']))[N_train:, :]
 
-    Y_N_train = np.array(dataset_val['y']).reshape(-1, 1)[:N_train]
-    T_N_train = np.array(dataset_val['A']).reshape(-1, 1)[:N_train]
-    
-    if 'X' in dataset_val.columns:
-        X_N_train = np.array(dataset_val['X']).reshape(-1, 1)[:N_train]
-        X_N_eval = np.array(dataset_val['X']).reshape(-1, 1)[N_train:]
-    else:
-        covariate_cols = [col for col in dataset_val.columns 
-                         if col not in ['y', 'A', 'Y0', 'Y1']]
-        X_N_train = np.array(dataset_val[covariate_cols])[:N_train]
-        X_N_eval = np.array(dataset_val[covariate_cols])[N_train:]
-    
-    T_N_eval = np.array(dataset_val['A']).reshape(-1, 1)[N_train:]
-    Y_N_eval = np.array(dataset_val['y']).reshape(-1, 1)[N_train:]
-        
     X_train_fit, X_test_fit, Y_train_fit, Y_test_fit, T_train_fit, T_test_fit = train_test_split(
         X_N_train, Y_N_train, T_N_train, test_size=0.2, random_state=42
     )
-    
+
     outcome_param_grid = {
         'n_estimators': [100, 200, 300, 500, 700, 1000],
         'max_depth': [2, 3, 4, 5, 6, 7, 8, 10],
@@ -268,9 +271,8 @@ def get_estimates(dataset_train, dataset_val, delta, significance_level = 0.05):
         n_iter=30
     )
     
-    # Tune propensity model
     class_weight = float(np.sum(T_N_train == 0) / np.sum(T_N_train == 1))
-    
+ 
     propensity_param_grid = {
         'n_estimators': [100, 200, 300, 500, 700, 1000],
         'max_depth': [2, 3, 4, 5, 6, 7, 8],
@@ -309,72 +311,50 @@ def get_estimates(dataset_train, dataset_val, delta, significance_level = 0.05):
     est_2 = ForestDRLearner(
         model_regression=regressor,
         model_propensity=propensity,
-        min_samples_leaf=5,  
+        min_samples_leaf=5,  # More flexible trees
         n_estimators=500,    
         max_depth=15,        
         random_state=42
     )
-    
+
     y_N_train = Y_N_train.reshape(N_train)
     est_2.fit(y_N_train, T_N_train, X=X_N_train)
-    print(f"X_N_train shape: {X_N_train.shape}")
-    print(f"T_N_train shape: {T_N_train.shape}")
-    print(f"Y_N_train shape: {Y_N_train.shape}")
-   
-    
-    cate_N = est_2.effect(X_N_eval)
-    print(f"cate_N shape: {cate_N.shape}")
 
+    cate_N = est_2.effect(X_N_eval)
     ate_N = np.mean(cate_N)
-    var_N = np.var(cate_N)    
-    print(f"ATE from obs data: {ate_N:.4f}")
-    print(f"Variance of CATE estimates: {var_N:.4f}")
-    
-    pred_n = est_2.effect(X_train).reshape(-1, 1)
+    var_N = np.var(cate_N)
+
+    pred_n = est_2.effect(X_train).reshape(-1, 1)  
+
+    print(f"Shape of AIPW: {aipw.shape}")
     print(f"Shape of pred_n: {pred_n.shape}")
-    
+
     mean_rectifier = np.mean(aipw - pred_n)
     var_rectifier = np.var(aipw - pred_n)
-    
-    print(f"Mean rectifier: {mean_rectifier:.4f}")
-    print(f"Var rectifier: {var_rectifier:.4f}")
-    
+
     ate_est_ppi = ate_N + mean_rectifier
-    ate_ci_norm_ppi = (ate_est_ppi - z_alpha * np.sqrt(var_rectifier/n + var_N/N_eval),
+    ate_ci_norm_ppi = (ate_est_ppi - z_alpha * np.sqrt(var_rectifier/n + var_N/N_eval), \
                        ate_est_ppi + z_alpha * np.sqrt(var_rectifier/n + var_N/N_eval))
-    
-    print(f"PPI var: {var_rectifier:.4f}")
-    print(f"PPI estimate: {ate_est_ppi:.4f}")
-    print(f"PPI CI: {ate_ci_norm_ppi}")
-    print(f"PPI CI width: {ate_ci_norm_ppi[1] - ate_ci_norm_ppi[0]:.4f}")
+    print("var_ppi", var_rectifier)
+    print("ate_est_ppi", ate_est_ppi)
+    print("ate_ci_ppi", ate_ci_norm_ppi)
+
 
     '''Normal/Asymptotic setting: Observational data only'''
     ate_est_obs = ate_N
-    ate_ci_obs = (ate_est_obs - z_alpha * np.sqrt(var_N/N_eval), 
-                 ate_est_obs + z_alpha * np.sqrt(var_N/N_eval))
-    
-    print(f"Obs-only estimate: {ate_est_obs:.4f}")
-    print(f"Obs-only CI: {ate_ci_obs}")
-    print(f"Obs-only CI width: {ate_ci_obs[1] - ate_ci_obs[0]:.4f}")
+    ate_ci_obs = (ate_est_obs - z_alpha * np.sqrt(var_N/N_eval), \
+                  ate_est_obs + z_alpha * np.sqrt(var_N/N_eval))
+    print("ate_ci_obs", ate_ci_obs)
 
     return [ate_est_aipw, ate_est_ppi, ate_est_obs], \
            [ate_ci_aipw, ate_ci_norm_ppi, ate_ci_obs]
 
-
 def sim_cases(seed, df_rct, df_obs, significance_level, delta):
-   
-   print(f"RCT data shape: {df_rct.shape}")
-   print(f"Obs data shape: {df_obs.shape}")
-   print(f"RCT data first 5 rows:\n{df_rct.head()}")
-   print(f"Obs data first 5 rows:\n{df_obs.head()}")
-   
-   set_seed(seed)
-   
-   ate_estimates, ate_ci = get_estimates(df_rct, df_obs, delta, significance_level)
-   
-   # Summary of results
-   methods = ["AIPW", "PPI", "Observational-only"]
-   for i, method in enumerate(methods):
-       print(f"{method}: Estimate = {ate_estimates[i]:.4f}, CI = {ate_ci[i]}, Width = {ate_ci[i][1] - ate_ci[i][0]:.4f}")
-       
-   return ate_estimates, ate_ci 
+    print(f"RCT data shape: {df_rct.shape}")
+    print(f"Obs data shape: {df_obs.shape}")
+    print(f"RCT data first 5 rows:\n{df_rct.head()}")
+    print(f"Obs data first 5 rows:\n{df_obs.head()}")
+    
+    ate_estimates, ate_ci = get_estimates(df_rct, df_obs, delta, significance_level)
+
+    return ate_estimates, ate_ci

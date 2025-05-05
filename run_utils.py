@@ -15,7 +15,7 @@ from synthetic_data_generation import *
 from sklearn.model_selection import GridSearchCV, RandomizedSearchCV, train_test_split
 from sklearn.calibration import CalibratedClassifierCV
 from xgboost import XGBRegressor, XGBClassifier
-from sklearn.metrics import roc_auc_score, brier_score_loss, log_loss, r2_score, mean_squared_error
+from sklearn.metrics import roc_auc_score, r2_score, mean_squared_error
 
 
 def set_seed(seed):
@@ -60,7 +60,7 @@ def data_generation(all_covs, n_rct, n_MC, X_range, pasx, seed, df_obs=None):
 
     return mean_trail, df_comp_big, df_obs_out
 
-def tune_model(model, param_grid, X, y, scoring, cv=3, verbose=1, n_iter=10):
+def tune_model(model, param_grid, X, y, scoring, cv=5, verbose=1, n_iter=20):
   
     random_search = RandomizedSearchCV(
         model, param_grid, scoring=scoring, cv=cv, verbose=verbose, 
@@ -69,7 +69,6 @@ def tune_model(model, param_grid, X, y, scoring, cv=3, verbose=1, n_iter=10):
     random_search.fit(X, y)
     
     print(f"Best parameters: {random_search.best_params_}")
-    print(f"Best score: {random_search.best_score_:.4f}")
     
     return random_search.best_estimator_
 
@@ -77,26 +76,24 @@ def estimate_e(X, A, model_e=None):
     '''
     Estimate propensity score using a regularized and tuned model
     '''
-    print(f"\n------ PROPENSITY MODEL DEBUG ------")
     print(f"X shape: {X.shape}, A shape: {A.shape}")
     
     if model_e is None:
         class_weight = float(np.sum(A == 0) / np.sum(A == 1))
-        print(f"Class imbalance ratio (control/treatment): {class_weight:.4f}")
         
         param_grid = {
-            'n_estimators': [100, 200],
-            'max_depth': [3, 4, 5],
-            'learning_rate': [0.01, 0.03, 0.05],
-            'min_child_weight': [1, 3, 5],
-            'subsample': [0.8, 1.0],
-            'colsample_bytree': [0.8, 1.0]
+            'n_estimators': [100, 200, 300, 500, 700, 1000],
+            'max_depth': [2, 3, 4, 5, 6, 7, 8],
+            'learning_rate': [0.001, 0.005, 0.01, 0.02, 0.05, 0.1],
+            'min_child_weight': [1, 2, 3, 5, 7],
+            'subsample': [0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+            'colsample_bytree': [0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+            'gamma': [0, 0.1, 0.2, 0.3, 0.5],
+            'reg_alpha': [0, 0.1, 0.2, 0.5, 1.0],
+            'reg_lambda': [0.1, 0.5, 1.0, 2.0, 5.0]
         }
         
         base_model = XGBClassifier(
-            gamma=0.1,
-            reg_alpha=0.2,
-            reg_lambda=1.0,
             scale_pos_weight=class_weight,
             random_state=42,
             n_jobs=-1
@@ -107,34 +104,30 @@ def estimate_e(X, A, model_e=None):
             param_grid, 
             X, 
             A.ravel(), 
-            scoring='roc_auc'
+            scoring='roc_auc',
+            cv=5,
+            n_iter=30
         )
         
-        # Apply calibration to ensure well-calibrated probabilities
         model_e = CalibratedClassifierCV(
             model_e,
             method='sigmoid',
-            cv=3
+            cv=5
         )
 
     e = model_e.fit(X, A.ravel()).predict_proba(X)[:, 1]
     
     auc = roc_auc_score(A, e)
-    brier = brier_score_loss(A, e)
-    logloss = log_loss(A, e)
     
     print(f"Propensity model fit metrics:")
-    print(f"  - AUC-ROC: {auc:.4f} (higher is better, > 0.7 is reasonable)")
-    print(f"  - Brier score: {brier:.4f} (lower is better, < 0.25 is reasonable)")
-    print(f"  - Log loss: {logloss:.4f} (lower is better)")
+    print(f"  - AUC-ROC: {auc:.4f}")
     
-    # Diagnostic for propensity distribution
+    # Diagnostic 
     print(f"Propensity distribution summary:")
     print(f"  - Min: {np.min(e):.4f}, Max: {np.max(e):.4f}")
     print(f"  - Mean: {np.mean(e):.4f}, Std: {np.std(e):.4f}")
-    print(f"  - Quantiles (10%, 25%, 50%, 75%, 90%): {np.quantile(e, [0.1, 0.25, 0.5, 0.75, 0.9])}")
     
-    # Check for extreme propensity scores (potential positivity violations)
+
     extreme_props = np.sum((e < 0.1) | (e > 0.9)) / len(e)
     print(f"  - Proportion of extreme propensity scores (<0.1 or >0.9): {extreme_props:.4f}")
     
@@ -147,13 +140,17 @@ def estimate_mu(X, A, y, model_y=None):
     train_data = np.concatenate((X, A), axis=1)
     
     if model_y is None:
-        # Default outcome model with hyperparameter tuning
+        # hyperparameter tuning
         param_grid = {
-            'n_estimators': [100, 200, 300],
-            'max_depth': [3, 5, 7],
-            'learning_rate': [0.01, 0.05, 0.1],
-            'subsample': [0.8, 1.0],
-            'colsample_bytree': [0.8, 1.0]
+            'n_estimators': [100, 200, 300, 500, 700, 1000],
+            'max_depth': [2, 3, 4, 5, 6, 7, 8, 10],
+            'learning_rate': [0.001, 0.005, 0.01, 0.02, 0.05, 0.1],
+            'subsample': [0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+            'colsample_bytree': [0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+            'min_child_weight': [1, 2, 3, 5, 7, 10],
+            'gamma': [0, 0.1, 0.2, 0.5],
+            'reg_alpha': [0, 0.1, 0.2, 0.5, 1.0, 2.0],
+            'reg_lambda': [0.1, 0.5, 1.0, 2.0, 5.0, 10.0]
         }
         
         base_model = XGBRegressor(
@@ -167,32 +164,20 @@ def estimate_mu(X, A, y, model_y=None):
             param_grid,
             train_data,
             y.ravel(),
-            scoring='neg_root_mean_squared_error'
+            scoring='neg_root_mean_squared_error',
+            cv=5,
+            n_iter=30
         )
-    
     mu = model_y.fit(train_data, y.reshape(-1, 1))
     
     y_pred = mu.predict(train_data)
     r2 = r2_score(y, y_pred)
     rmse = np.sqrt(mean_squared_error(y, y_pred))
     
-    print(f"\n------ OUTCOME MODEL DEBUG ------")
     print(f"Outcome model fit metrics:")
-    print(f"  - R² score: {r2:.4f} (higher is better, > 0.5 is reasonable)")
-    print(f"  - RMSE: {rmse:.4f} (lower is better)")
-    
-    # Calculate and print residuals summary
-    residuals = y - y_pred
-    print(f"Residuals summary:")
-    print(f"  - Mean: {np.mean(residuals):.4f} (should be close to 0)")
-    print(f"  - Std: {np.std(residuals):.4f}")
-    print(f"  - Quantiles (10%, 25%, 50%, 75%, 90%): {np.quantile(residuals, [0.1, 0.25, 0.5, 0.75, 0.9])}")
-    
-    # Simple check for heteroskedasticity by treatment group
-    res_treated = residuals[A.flatten() == 1]
-    res_control = residuals[A.flatten() == 0]
-    print(f"  - Residual std by group: Control={np.std(res_control):.4f}, Treated={np.std(res_treated):.4f}")
-    
+    print(f"  - R² score: {r2:.4f}")
+    print(f"  - RMSE: {rmse:.4f}")
+        
     test_0 = np.concatenate((X, np.zeros_like(A)), axis=1)
     test_1 = np.concatenate((X, np.ones_like(A)), axis=1)
     mu0 = mu.predict(test_0)
@@ -202,7 +187,6 @@ def estimate_mu(X, A, y, model_y=None):
 
 def get_estimates(dataset_train, dataset_val, delta, significance_level=0.05):
     '''Param setting'''
-    print("\n====== STARTING ESTIMATION PROCEDURE ======")
     print(f"Dataset train shape: {dataset_train.shape}")
     print(f"Dataset validation shape: {dataset_val.shape}")
     
@@ -222,18 +206,14 @@ def get_estimates(dataset_train, dataset_val, delta, significance_level=0.05):
     A_flat = A_train.flatten()
     Y_flat = Y_train.flatten()
     e_flat = e.flatten()
-    mu0_flat = mu0
-    mu1_flat = mu1
-    
+
     aipw_term1 = (A_flat * Y_flat / e_flat) - ((1 - A_flat) * Y_flat / (1 - e_flat))
-    aipw_term2 = ((A_flat - e_flat) / e_flat * (1 - e_flat)) * ((1-e_flat) * mu1_flat + e_flat * mu0_flat)
+    aipw_term2 = ((A_flat - e_flat) / e_flat * (1 - e_flat)) * ((1-e_flat) * mu1 + e_flat * mu0)
     aipw = (aipw_term1 - aipw_term2).reshape(-1, 1)
     
     print(f"Shape of A_train: {A_train.shape}")
     print(f"Shape of Y_train: {Y_train.shape}")
     print(f"Shape of e: {e.shape}")
-    print(f"Shape of mu0: {np.array(mu0).shape}")
-    print(f"Shape of mu1: {np.array(mu1).shape}")
     print(f"Corrected shape of AIPW: {aipw.shape}")
     
     ate_est_aipw = np.mean(aipw)
@@ -245,7 +225,6 @@ def get_estimates(dataset_train, dataset_val, delta, significance_level=0.05):
     print(f"AIPW CI width: {ate_ci_aipw[1] - ate_ci_aipw[0]:.4f}")
 
     '''PPI Implementation'''
-    print("\n------ PPI ESTIMATION ------")
     N = dataset_val.shape[0]
     N_train = int(N/2)
     N_eval = N - N_train
@@ -256,18 +235,21 @@ def get_estimates(dataset_train, dataset_val, delta, significance_level=0.05):
     X_N_eval = np.array(dataset_val['X']).reshape(-1, 1)[N_train:]
     T_N_eval = np.array(dataset_val['A']).reshape(-1, 1)[N_train:]
     Y_N_eval = np.array(dataset_val['y']).reshape(-1, 1)[N_train:]
-    
-    print(f"Treatment proportion in obs train data: {np.mean(T_N_train):.4f}")
-    
+        
     X_train_fit, X_test_fit, Y_train_fit, Y_test_fit, T_train_fit, T_test_fit = train_test_split(
         X_N_train, Y_N_train, T_N_train, test_size=0.2, random_state=42
     )
     
     outcome_param_grid = {
-        'n_estimators': [100, 200, 300],
-        'max_depth': [3, 5, 7],
-        'learning_rate': [0.01, 0.03, 0.05],
-        'min_child_weight': [1, 3, 5]
+        'n_estimators': [100, 200, 300, 500, 700, 1000],
+        'max_depth': [2, 3, 4, 5, 6, 7, 8, 10],
+        'learning_rate': [0.001, 0.005, 0.01, 0.02, 0.05, 0.1],
+        'min_child_weight': [1, 2, 3, 5, 7, 10],
+        'subsample': [0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+        'colsample_bytree': [0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+        'gamma': [0, 0.1, 0.2, 0.5],
+        'reg_alpha': [0, 0.1, 0.2, 0.5, 1.0, 2.0],
+        'reg_lambda': [0.1, 0.5, 1.0, 2.0, 5.0, 10.0]
     }
     
     base_regressor = XGBRegressor(
@@ -288,28 +270,29 @@ def get_estimates(dataset_train, dataset_val, delta, significance_level=0.05):
         outcome_param_grid,
         X_T_train_fit,
         Y_train_fit.ravel(),
-        scoring='neg_root_mean_squared_error'
+        scoring='neg_root_mean_squared_error',
+        cv=5,
+        n_iter=30
     )
     
     class_weight = float(np.sum(T_N_train == 0) / np.sum(T_N_train == 1))
-    print(f"Class imbalance ratio (control/treatment): {class_weight:.4f}")
     
     propensity_param_grid = {
-        'n_estimators': [100, 200],
-        'max_depth': [3, 4, 5],
-        'learning_rate': [0.01, 0.03, 0.05]
+        'n_estimators': [100, 200, 300, 500, 700, 1000],
+        'max_depth': [2, 3, 4, 5, 6, 7, 8],
+        'learning_rate': [0.001, 0.005, 0.01, 0.02, 0.05, 0.1],
+        'min_child_weight': [1, 2, 3, 5, 7],
+        'subsample': [0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+        'colsample_bytree': [0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+        'gamma': [0, 0.1, 0.2, 0.3, 0.5],
+        'reg_alpha': [0, 0.1, 0.2, 0.5, 1.0],
+        'reg_lambda': [0.1, 0.5, 1.0, 2.0, 5.0]
     }
     
     base_propensity = XGBClassifier(
-        subsample=0.8,
-        colsample_bytree=0.8,
-        min_child_weight=3,
-        gamma=0.1,
-        reg_alpha=0.2,
-        reg_lambda=1.0,
-        random_state=42,
-        n_jobs=-1,
         scale_pos_weight=class_weight,
+        random_state=42,
+        n_jobs=-1
     )
     
     tuned_propensity = tune_model(
@@ -318,21 +301,23 @@ def get_estimates(dataset_train, dataset_val, delta, significance_level=0.05):
         X_N_train,
         T_N_train.ravel(),
         scoring='roc_auc',
+        cv=5,
+        n_iter=30,
         verbose=0
     )
     
     propensity = CalibratedClassifierCV(
         tuned_propensity,
         method='sigmoid',
-        cv=3
+        cv=5
     )
 
     est_2 = ForestDRLearner(
         model_regression=regressor,
         model_propensity=propensity,
-        min_samples_leaf=10,
-        n_estimators=252,
-        max_depth=6,
+        min_samples_leaf=5,  
+        n_estimators=500,    
+        max_depth=15,       
         random_state=42
     )
 
@@ -347,7 +332,6 @@ def get_estimates(dataset_train, dataset_val, delta, significance_level=0.05):
     print(f"Variance of CATE estimates: {var_N:.4f}")
     
     pred_n = est_2.effect(X_train).reshape(-1, 1)
-    print(f"Shape of AIPW: {aipw.shape}")
     print(f"Shape of pred_n: {pred_n.shape}")
 
     mean_rectifier = np.mean(aipw - pred_n)
@@ -373,7 +357,7 @@ def get_estimates(dataset_train, dataset_val, delta, significance_level=0.05):
     print(f"Obs-only estimate: {ate_est_obs:.4f}")
     print(f"Obs-only CI: {ate_ci_obs}")
     print(f"Obs-only CI width: {ate_ci_obs[1] - ate_ci_obs[0]:.4f}")
-    print("\n====== ESTIMATION COMPLETE ======")
+
 
     return [ate_est_aipw, ate_est_ppi, ate_est_obs], \
            [ate_ci_aipw, ate_ci_norm_ppi, ate_ci_obs]

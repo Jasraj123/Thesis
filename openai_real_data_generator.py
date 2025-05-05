@@ -11,7 +11,7 @@ from io import StringIO
 from key import OPENAI_API_KEY
 
 class ObservationalDataGenerator:
-    def __init__(self, api_key=None, model="gpt-4o-mini"):
+    def __init__(self, api_key=None, model="gpt-4o"):
 
         self.api_key = api_key or OPENAI_API_KEY
         self.client = OpenAI(api_key=self.api_key)
@@ -199,7 +199,6 @@ class ObservationalDataGenerator:
                 # Extract content from response
                 content = response.choices[0].message.content
                 
-                # Process content to remove markdown code blocks before saving
                 cleaned_content = content
                 if "```" in content:
                     parts = content.split("```")
@@ -220,7 +219,6 @@ class ObservationalDataGenerator:
                 if "```" in content:
                     parts = content.split("```")
                     for part in parts:
-                        # Look for CSV with the right column headers (now with multiple covariates)
                         if "AGE" in part and "RSBP" in part and "ST1PE" in part and "A" in part:
                             content = part.strip()
                             if content.startswith("csv") or content.startswith("CSV"):
@@ -229,7 +227,6 @@ class ObservationalDataGenerator:
                 
                 df = pd.read_csv(StringIO(content))
                 
-                # Extract y values, handling different column names
                 if 'y' in df.columns:
                     y_values = df['y'].values
                 elif 'Y' in df.columns:
@@ -245,7 +242,6 @@ class ObservationalDataGenerator:
                     all_values = np.zeros(len(batch_features))
                     all_values[:len(y_values)] = y_values
                     
-                    # Process the remaining rows in smaller chunks
                     remaining_start = len(y_values)
                     chunk_size = 200  
                     
@@ -291,7 +287,6 @@ class ObservationalDataGenerator:
                             max_tokens=2000
                         )
                         
-                        chunk_content = chunk_response.choices[0].message.content
                         
                     try: 
                         if "```" in content:
@@ -313,7 +308,6 @@ class ObservationalDataGenerator:
                         else:
                             raise ValueError("No y column found in response")
                             
-                            # Add these values to our collection
                         chunk_size_actual = min(len(chunk_y_values), remaining_end - remaining_start)
                         all_values[remaining_start:remaining_start+chunk_size_actual] = chunk_y_values[:chunk_size_actual]
                             
@@ -325,7 +319,6 @@ class ObservationalDataGenerator:
                             # Continue to next chunk
                         remaining_start = remaining_end
                     
-                    # Now use the complete set of values
                     y_values = all_values
                 
                 # Ensure binary values
@@ -362,7 +355,6 @@ class ObservationalDataGenerator:
                 # Extract content from response
                 content = response.choices[0].message.content
                 
-                # Process content to remove markdown code blocks before saving
                 cleaned_content = content
                 if "```" in content:
                     parts = content.split("```")
@@ -409,7 +401,6 @@ class ObservationalDataGenerator:
                 if not all(col in df.columns for col in required_cols):
                     raise ValueError(f"Missing required columns. Got: {df.columns.tolist()}")
                 
-                # Keep only the required columns and convert to numeric
                 df = df[required_cols]
                 df = df.apply(pd.to_numeric, errors='coerce')
                 
@@ -428,7 +419,7 @@ class ObservationalDataGenerator:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate synthetic observational data for stroke study")
     parser.add_argument("--api_key", type=str, help="OpenAI API key (or set OPENAI_API_KEY environment variable)")
-    parser.add_argument("--model", type=str, default="gpt-4o-mini", help="OpenAI model to use")
+    parser.add_argument("--model", type=str, default="gpt-4o", help="OpenAI model to use")
     parser.add_argument("--rct_file", type=str, default="llm_training.csv", help="Reference RCT data file")
     parser.add_argument("--num_samples", type=int, default=30000, help="Total number of samples to generate")
     parser.add_argument("--batch_size", type=int, default=300, help="Batch size for API calls")
@@ -439,5 +430,4 @@ if __name__ == "__main__":
     
     generator.load_rct_data(args.rct_file)
     
-    # Generate data
     synthetic_data = generator.generate_data(total_samples=args.num_samples, batch_size=args.batch_size) 

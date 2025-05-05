@@ -19,8 +19,8 @@ def run_experiment(config_run, seed_list, methods_list, alpha, llm_obs_path):
     n_rct = config_run['data']['n_rct']
     n_obs = config_run['data']['n_obs']
     
-    # Generate a much larger RCT dataset to randomly sample from
-    big_n_rct = max(len(seed_list) * n_rct * 5, 10000)  # Generate a large pool of RCT data
+    big_n_rct = max(len(seed_list) * n_rct * 5, 10000) 
+    
     n_MC = config_run['data']['n_MC']
     pasx = config_run['pasx']
     
@@ -55,7 +55,6 @@ def run_experiment(config_run, seed_list, methods_list, alpha, llm_obs_path):
         
         df_rct = big_df_rct.iloc[seed_index * n_rct: (seed_index + 1) * n_rct]
         
-        # Random sampling for observational data
         obs_indices = np.random.choice(len(big_df_obs), size=n_obs, replace=False)
         df_obs = big_df_obs.iloc[obs_indices]
         
@@ -74,15 +73,14 @@ def run_experiment(config_run, seed_list, methods_list, alpha, llm_obs_path):
 
 if __name__ == "__main__":
     seed_list = [
-        list(range(0, 20, 2)),  # Seeds for alpha=0.05 
-        list(range(1, 20, 2))   # Seeds for alpha=0.1
+        list(range(0, 18, 2)),  # alpha=0.05 
+        list(range(1, 18, 2))   # alpha=0.1
     ]    
 
     current_dir = os.path.dirname(os.path.abspath(__file__))
     config_path = os.path.join(current_dir, "config.yaml")
 
     config_run = yaml.safe_load(open(config_path, 'r'))
-    # Use the alpha value from config
     alpha = config_run['data']['alpha']
     alpha_index = 0 if alpha == 0.05 else 1  # Determine which seed list to use
     

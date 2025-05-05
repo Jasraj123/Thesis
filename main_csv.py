@@ -8,12 +8,10 @@ from run_utils_csv import sim_cases  # Now using run_utils_csv instead
 from csv_data_handler import CSVDataHandler
 
 def run_experiment(config_run, seed_list, methods_list, alpha):
-    # Extract configurations
     alpha = config_run['data']['alpha']
     delta = config_run['data']['delta']
     
-    # Get covariate names
-    all_covs = config_run['data']['covairate_name']
+    all_covs = config_run['data']['covariate_name']
     print(f"Using covariates: {all_covs}")
     
     # Get sample sizes
@@ -32,8 +30,7 @@ def run_experiment(config_run, seed_list, methods_list, alpha):
         seed=config_run['data']['data_seed']
     )
     
-    # Calculate true ATE once from all RCT data
-    mean_trail, _ = data_handler.compute_true_ate()
+    mean_trail, _ = data_handler.compute_estimated_ate()
     
     save_dir = config_run['relative_path']
     

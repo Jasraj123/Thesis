@@ -39,7 +39,7 @@ seed_list_dic = {
 }
 
 exp_name = "rct_data"
-fig, ax = plt.subplots(2, 1, figsize=(4, 6))
+fig, ax = plt.subplots(2, 1, figsize=(3, 5))
 
 for alpha_index in range(len(alpha_list)):
     read_dir = os.path.join(path, "code", exp_name, "experiments_u", "exp_results", f"alpha_{alpha_list[alpha_index]}", "unconfounding_0")

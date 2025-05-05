@@ -12,9 +12,9 @@ import os, json, itertools
 
 class SyntheticDataModule:
     def __init__(self,
-                n_rct=800,
+                n_rct=700,
                 n_MC=100000,
-                covs=["X"],  # Keep X as the primary covariate for compatibility
+                covs=["X"],  
                 X_range=np.linspace(-1, 1, 51),
                 pasx={"lb": 0.1, "ub": 0.9, "trial": 0.5},
                 seed=42,
@@ -32,81 +32,36 @@ class SyntheticDataModule:
         self.pas1 = pasx["trial"]  # probability of treatment assignment in the trial
         self.sbl, self.sbu = 0.5, 1
         
-        # Set random seed for reproducibility
         np.random.seed(self.seed)
         random.seed(self.seed)
-        
-        # Complex function parameters
-        self.freq_params = np.random.uniform(0.5, 3.0, size=3)  # Still use 3 features internally
-        self.phase_params = np.random.uniform(0, 2*np.pi, size=3)
-        self.amplitude_params = np.random.uniform(0.5, 2.5, size=3)
-        self.interaction_weights = np.random.uniform(-1, 1, size=(3, 3))
 
-    def _rbf_kernel_like(self, X1, X2=None, length_scale=1.0):
-        """Compute an RBF-like function between points"""
-        if X2 is None:
-            X2 = X1
-        X1 = np.atleast_2d(X1)
-        X2 = np.atleast_2d(X2)
-        return np.exp(-0.5 * np.sum(((X1[:, np.newaxis, :] - X2[np.newaxis, :, :]) / length_scale) ** 2, axis=2))
-    
-    def _generate_complex_nonlinear_features(self, X):
-        """Generate complex nonlinear features from input covariates"""
-        n_samples = len(X)
-        
-        X1 = X.copy()
-        X2 = np.sin(2.5 * X) + 0.3 * np.random.normal(size=n_samples)
-        X3 = np.cos(1.7 * X) + 0.4 * np.random.normal(size=n_samples)
-        
-        X_matrix = np.column_stack([X1, X2, X3])
-        
-        # Basic nonlinear transformations
-        features = np.zeros((n_samples, 5))
-        
-        # Sinusoidal components with varying frequencies and phases
-        for i in range(3):  # Use 3 components
-            features[:, 0] += self.amplitude_params[i] * np.sin(self.freq_params[i] * X_matrix[:, i] + self.phase_params[i])
-            features[:, 1] += self.amplitude_params[i] * np.cos(self.freq_params[i] * X_matrix[:, i] * 1.5)
-        
-        # Exponential and polynomial components
-        features[:, 2] = np.exp(-0.5 * np.sum(X_matrix[:, :3]**2, axis=1))
-        features[:, 3] = np.sum(X_matrix[:, :3]**3, axis=1) - np.sum(X_matrix[:, :3]**2, axis=1)
-        
-        # Interaction terms
-        for i in range(3):
-            for j in range(i+1, 3):
-                features[:, 4] += self.interaction_weights[i, j] * X_matrix[:, i] * X_matrix[:, j]
-        
-        return features
 
     def _outcome_model(self, X, treatment):
         """
-        Complex nonlinear outcome model with treatment interaction effects
+        Advanced nonlinear outcome model with interactions between covariates.
         """
+        X = np.asarray(X)
         n = len(X)
-        
-        # Generate complex features
-        features = self._generate_complex_nonlinear_features(X)
-        
-        # Treatment-specific effects with complex heterogeneity
-        treatment_effect = 15.0 + 3.0 * features[:, 0] + 2.5 * features[:, 3]
-        
-        # Control outcome (complex baseline)
-        y0 = 5.0 * features[:, 0] + 3.0 * features[:, 1] + 7.0 * features[:, 2] + 2.0 * features[:, 4]
-        
-        # Treatment outcome (baseline + effect)
+
+        X1 = X + 0.3 * np.random.normal(size=n)  
+        X2 = X**2 + 0.5 * np.random.normal(size=n)  #
+        X3 = np.sin(X * 2) + 0.2 * np.random.normal(size=n)  
+
+        interaction_1 = X * X1  # interaction between X and X1
+        interaction_2 = X2 * X3  # interaction between X2 and X3
+
+        y0 = 3 + 2 * X + 1.5 * X1 - 2 * X2 + 1.8 * np.cos(3*X**2) + 0.5 * interaction_1 + 0.2 * interaction_2
+
+        treatment_effect = 3 + 1.5 * X + 2 * X2 + 0.7 * np.sin(1.5 * X) - 1 * X3
+
         y1 = y0 + treatment_effect
-        
-        # Heteroskedastic noise
-        noise_scale = 0.5 + 0.5 * np.abs(features[:, 2])
+
+        # Add noise
+        noise_scale = 1.0 + 0.5 * np.abs(X)
         noise = np.random.normal(0, noise_scale, size=n)
-        
-        # Select outcomes based on treatment
+
         if np.isscalar(treatment):
-            if treatment == 0:
-                return y0 + noise
-            else:
-                return y1 + noise
+            return y0 + noise if treatment == 0 else y1 + noise
         else:
             return np.where(treatment.reshape(-1) == 1, y1, y0) + noise
 
@@ -114,26 +69,21 @@ class SyntheticDataModule:
         df = pd.DataFrame(index=np.arange(self.n_rct))
         np.random.seed(self.seed + 1)
 
-        # Generate primary covariate
         df["X"] = np.random.uniform(-1.5, 1.5, size=self.n_rct)
         
-        # For RCT, treatment is random (not influenced by any confounders)
         df["A"] = np.array(self.pas1 > np.random.uniform(size=self.n_rct), dtype=int)
 
-        # Generate potential outcomes (without U for true RCT)
         print("Generating potential outcomes...")
         Y0 = self._outcome_model(df["X"].values, treatment=0)
         Y1 = self._outcome_model(df["X"].values, treatment=1)
         
-        df['Y0'] = Y0
-        df['Y1'] = Y1
+        df["Y0"] = Y0
+        df["Y1"] = Y1
 
-        # Observed outcome
         df["y"] = df["Y1"] * df["A"] + df["Y0"] * (1 - df["A"])
 
-        # Return only the observed variables (X, A, y)
-        return df[["X", "A", "y"]]
-        
+        return df[["X", "A", "y"]]      
+      
     def get_df(self):
         """Get both RCT and observational datasets"""
         df_rct = self._generate_data_rct()
@@ -144,93 +94,14 @@ class SyntheticDataModule:
         """Calculate true treatment effect using Monte Carlo"""
         np.random.seed(self.seed)
         
-        # Generate covariate for MC samples
         X_mc = np.random.uniform(-1.5, 1.5, size=self.n_MC)
         
-        # Calculate potential outcomes for all MC samples 
         print("Calculating potential outcomes...")
         Y1 = self._outcome_model(X_mc, treatment=1)  # Outcomes if everyone treated
         Y0 = self._outcome_model(X_mc, treatment=0)  # Outcomes if no one treated
 
-        # Calculate individual treatment effects and their mean
         treatment_effect = Y1 - Y0
         true_ate = np.mean(treatment_effect)
         std_ate = np.std(treatment_effect) / np.sqrt(self.n_MC)
 
         return true_ate, std_ate
-
-
-# def generate_large_dataset(n_samples=250000, seed=42, output_file="optimized_generated_data.csv"):
-#     np.random.seed(seed)
-        
-#     base_generator = SyntheticDataModule(n_rct=n_samples, seed=seed)
-    
-#     # Use the same distribution as RCT data instead of beta
-#     X = np.random.uniform(-1.5, 1.5, size=n_samples)
-    
-#     # Unmeasured confounders with REDUCED impact
-#     U = np.random.normal(0, 0.5, size=n_samples)  # Reduced variance
-    
-#     # Reduce the influence of U on treatment assignment
-#     propensity = expit(0.3 * X + 0.2 * U)  # Reduced coefficients
-#     A = np.random.binomial(1, propensity)
-    
-#     n = len(X)
-#     X1 = X.copy()
-#     X2 = np.sin(2.5 * X) + 0.3 * np.random.normal(size=n)
-#     X3 = np.cos(1.7 * X) + 0.4 * np.random.normal(size=n)
-    
-#     X_matrix = np.column_stack([X1, X2, X3])
-    
-#     features = np.zeros((n, 5))
-    
-#     freq_params = base_generator.freq_params
-#     phase_params = base_generator.phase_params
-#     amplitude_params = base_generator.amplitude_params
-#     interaction_weights = base_generator.interaction_weights
-    
-#     for i in range(3):
-#         features[:, 0] += amplitude_params[i] * np.sin(freq_params[i] * X_matrix[:, i] + phase_params[i])
-#         features[:, 1] += amplitude_params[i] * np.cos(freq_params[i] * X_matrix[:, i] * 1.5)
-    
-#     features[:, 2] = np.exp(-0.5 * np.sum(X_matrix[:, :3]**2, axis=1))
-#     features[:, 3] = np.sum(X_matrix[:, :3]**3, axis=1) - np.sum(X_matrix[:, :3]**2, axis=1)
-    
-#     for i in range(3):
-#         for j in range(i+1, 3):
-#             features[:, 4] += interaction_weights[i, j] * X_matrix[:, i] * X_matrix[:, j]
-    
-#     # Base effect with REDUCED influence from U
-#     treatment_effect = 15.0 + 3.0 * features[:, 0] + 2.5 * features[:, 3] + 0.3 * U  # Reduced U coefficient
-    
-#     # Base outcome with REDUCED influence from U
-#     y0 = 5.0 * features[:, 0] + 3.0 * features[:, 1] + 7.0 * features[:, 2] + 2.0 * features[:, 4] - 0.5 * U  # Reduced U coefficient
-    
-#     y1 = y0 + treatment_effect
-    
-#     # Reduced influence of U on noise
-#     noise_scale = 0.5 + 0.5 * np.abs(features[:, 2]) + 0.1 * np.abs(U)  # Reduced U coefficient
-#     noise = np.random.normal(0, noise_scale, size=n)
-    
-#     Y = np.where(A == 1, y1, y0) + noise
-    
-#     large_df = pd.DataFrame({
-#         'X': X,
-#         'A': A,
-#         'y': Y
-#     })
-    
-#     large_df.to_csv(output_file, index=False)
-#     print(f"Saved large observational dataset to {output_file}")
-#     print("Modified observational data to reduce confounding:")
-#     print(" - Uniform distribution for covariates (matched to RCT)")
-#     print(" - Reduced influence of unmeasured confounders on treatment assignment")
-#     print(" - Reduced influence of unmeasured confounders on outcomes")
-#     print(" - Maintained treatment effect heterogeneity pattern")
-    
-#     return large_df
-
-# if __name__ == "__main__":
-#     generate_large_dataset()
-#     print("Done")
-
